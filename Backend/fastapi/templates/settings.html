@@ -217,7 +217,7 @@
         <!-- Restart -->
         <label class="s-label">Restart App</label>
         <p style="font-size:0.83rem;color:var(--text-sec);margin-bottom:1rem">
-            Pulls the latest code from the upstream repo/branch above and restarts the server.
+            Pulls the latest code from the configured repository/branch below and restarts the server.
             The web app becomes unreachable for a few seconds — this page will reconnect
             automatically once it's back online.
         </p>
@@ -387,7 +387,7 @@
                 <label class="s-label" for="upstream_branch">Upstream Branch</label>
                 <input type="text" id="upstream_branch" class="s-input"
                     value="{{ settings.upstream_branch }}"
-                    placeholder="master">
+                    placeholder="main">
             </div>
         </div>
     </div>

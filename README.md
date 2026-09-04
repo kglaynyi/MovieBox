@@ -502,7 +502,7 @@ Everything here is on the **Settings** page (`/admin/settings`) — no terminal 
 
 ### 🆙 Update to the latest code
 - The **same Restart button also updates**: it pulls the newest code from the **Upstream Repo / Branch** you set in Settings, then restarts.
-- So to update: make sure *Upstream Repo* = `https://github.com/weebzone/Telegram-Stremio` (and branch, e.g. `master`) in Settings → click **Restart**. Done. 🎉
+- Default upstream is this repository: `https://github.com/kglaynyi/MovieBox` on `main`. Change it in Settings only if you intentionally want a different source.
 
 ### ⚙️ Everything else
 All other options — TMDB key, Base URL, channels, subscriptions, proxy, extra databases, multi-token bots, replace mode, hide catalog, etc. — live on the **Settings** page and apply **instantly, without a restart**. That includes the **Telegram user session** for Global Search (**Settings → Telegram User Session**).
@@ -675,7 +675,7 @@ Open **Settings** (`/admin/settings`) after logging in. Here's what each card do
 | :--- | :--- |
 | **TMDB API Key** | A free TMDB **v3** key from [themoviedb.org](https://www.themoviedb.org) → *Settings → API*. Powers automatic poster & metadata matching. |
 | **Base URL** | Your public address, e.g. `https://your-domain.com`. **Important:** Stremio uses this to reach your streams, so it must be correct. |
-| **Upstream Repo / Branch** | Used by the **Restart/Update** button to auto-update. Set repo to `https://github.com/weebzone/Telegram-Stremio` and branch to `master`. |
+| **Upstream Repo / Branch** | Used by the **Restart/Update** button to auto-update. Default is `https://github.com/kglaynyi/MovieBox` on `main`. |
 
 ### 💳 Subscription (optional)
 Turn this on to monetise access. Set the **Subscription Group ID**, **Payment Instructions** (your UPI / bank / PayPal text), an optional **Payment QR image URL**, and the **Approver IDs** (who can approve payments). Renewal and "join the channel" prompts in Stremio point users back to **your bot automatically** — no URL to configure. Full flow in [Subscriptions & Access](#-subscriptions--access).
@@ -727,9 +727,9 @@ Before you begin, make sure you have:
 
 ## 🐙 Heroku Guide
 
-Follow the ready-made Google Colab tool to deploy on Heroku:
+Use your Google Colab deployment notebook for Heroku, and point the repository source to:
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/weebzone/Colab-Tools/blob/main/telegram%20stremio.ipynb)
+`https://github.com/kglaynyi/MovieBox`
 
 ## 🐳 VPS Guide (recommended)
 
@@ -738,8 +738,8 @@ Deploy on a VPS using **Docker Compose (recommended)** or **plain Docker**.
 ### 1️⃣ Step 1: Clone & Configure
 
 ```bash
-git clone https://github.com/weebzone/Telegram-Stremio
-cd Telegram-Stremio
+git clone https://github.com/kglaynyi/MovieBox
+cd MovieBox
 cp sample_config.env config.env
 nano config.env
 ```
@@ -811,7 +811,7 @@ Deploy a **free, always-online** instance — no VPS, no domain, no Docker knowl
 > 💡 **How it works:** this repo ships a GitHub Action that pushes your code to your Hugging Face Space on every change. The Space then builds the included `Dockerfile` and runs your server.
 
 ### ⭐ Step 1: Star this Repository
-Open the repo and tap **⭐ Star** at the top right → [github.com/weebzone/Telegram-Stremio](https://github.com/weebzone/Telegram-Stremio)
+Open the repo and tap **⭐ Star** at the top right → [github.com/kglaynyi/MovieBox](https://github.com/kglaynyi/MovieBox)
 
 ### 🍴 Step 2: Fork the Repository
 Tap **Fork** (top right) → **Create fork**. This gives you your own copy for private secrets and the deploy workflow.
