@@ -1,0 +1,29 @@
+name: Regression tests
+on:
+  pull_request:
+  push:
+    branches: [master]
+permissions:
+  contents: read
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: python -m pip install uv
+      - run: uv sync --locked --no-dev --python "$(command -v python)"
+      - run: .venv/bin/python -m unittest discover -s tests -v
+      - run: node tests/test_gdrive_controls.cjs
+      - run: node --check Backend/fastapi/static/gdrive_tools.js
+      - run: .venv/bin/python -m compileall -q Backend tests
+      - run: uvx ruff check --select F821,F822,F823 Backend tests
+      - run: bash -n start.sh && git diff --check

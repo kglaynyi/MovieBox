@@ -323,8 +323,13 @@ async def gdrive_media_streamer(
     token: str,
     token_data: dict | None = None,
     stream_id_hash: str | None = None,
-    source_kind: str = "html",
+    source_kind: str | None = None,
 ):
+    if source_kind is None and stream_id_hash:
+        try:
+            source_kind = (await decode_string(stream_id_hash)).get("kind", "html")
+        except (ValueError, TypeError, AttributeError):
+            raise HTTPException(400, "Invalid media identity.") from None
     if source_kind == "gdi_js" and not await db.is_indexed_gdrive_stream(stream_id_hash, source_url):
         raise HTTPException(404, "This GDI-JS video is not in the indexed library.")
     stream_id = secrets.token_hex(8)

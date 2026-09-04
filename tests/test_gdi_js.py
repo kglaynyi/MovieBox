@@ -4,7 +4,7 @@ import json
 import os
 from pathlib import Path
 from unittest import IsolatedAsyncioTestCase, TestCase
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 os.environ.update(API_ID="12345", API_HASH="0" * 32, BOT_TOKEN="12345:dummy",
                   OWNER_ID="12345", DATABASE="mongodb://localhost:27017,mongodb://localhost:27017")
@@ -259,9 +259,12 @@ class AppIntegration(IsolatedAsyncioTestCase):
         from Backend.helper import scan_manager
         manager = GDriveScanManager()
         database = AsyncMock()
+        database.dbs = {}
         manager.bind_db(database)
         files = [{"name": "Movie.mp4", "url": ROOT + "Movies/Movie.mp4", "kind": "gdi_js"}]
-        with patch.object(gdi, "discover", AsyncMock(return_value=files)) as discover, \
+        async def pages(*args, **kwargs):
+            yield files, {"queue": [], "pages": 1, "files": 1}, "/0:/Movies/"
+        with patch.object(gdi, "discover_pages", Mock(side_effect=pages)) as discover, \
              patch.object(scan_manager, "encode_string", AsyncMock(return_value="id")) as encode, \
              patch.object(manager, "_stream_id_exists", AsyncMock(return_value=False)), \
              patch.object(scan_manager, "metadata", AsyncMock(return_value={"title": "Movie"})):
@@ -274,8 +277,12 @@ class AppIntegration(IsolatedAsyncioTestCase):
     async def test_failure_does_not_mutate_library(self):
         manager = GDriveScanManager()
         database = AsyncMock()
+        database.dbs = {}
         manager.bind_db(database)
-        with patch.object(gdi, "discover", AsyncMock(side_effect=gdi.GDIError("Index requires login"))):
+        async def pages(*args, **kwargs):
+            raise gdi.GDIError("Index requires login")
+            yield
+        with patch.object(gdi, "discover_pages", pages):
             await manager._run()
         self.assertEqual(manager.state["status"], "error")
         self.assertEqual(database.mock_calls, [])

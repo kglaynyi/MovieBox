@@ -91,8 +91,17 @@
             label.append(check, name); row.append(label, open); box.append(row);
         }
     }
+    async function ready() {
+        await configReady;
+        if (!config || config.source_type !== 'gdi_js') {
+            error('gdi-error', 'Save a valid GDI-JS source in Settings, then reload this page.');
+            return false;
+        }
+        return true;
+    }
     async function browse(path, more = false) {
-        if (browsing) return;
+        if (!await ready() || browsing) return;
+        path = path || config.root_path;
         browsing = true;
         el('gdi-connect').disabled = true; el('gdi-more').disabled = true;
         error('gdi-error', '');
@@ -116,7 +125,7 @@
         finally { browsing = false; el('gdi-connect').disabled = false; el('gdi-more').disabled = false; }
     }
     async function saveSelection() {
-        if (!config || config.source_type !== 'gdi_js') return;
+        if (!await ready()) return;
         const result = await api('gdrive-folders/selection', 'PUT', {folders: [...selected]});
         selected = new Set(result.selected_folders || []);
         dirty = false; renderSelection();
@@ -139,11 +148,11 @@
             bar.style.width = s.has_progress ? (s.progress || 0) + '%' : '';
             text('gd-scan-current', s.phase === 'discovery'
                 ? `Finding videos · ${s.discovery_pages || 0} pages · ${s.discovery_files || 0} videos`
-                : `Indexing · ${s.current_id || 0}/${s.current_target_id || 0}`);
+                : (s.has_progress ? `Indexing · ${s.current_id || 0}/${s.current_target_id || 0}` : `Indexing · ${s.current_id || 0} videos processed`));
             error('gd-scan-error', ''); startPolling();
         } else {
             bar.classList.remove('indeterminate'); bar.style.width = status === 'completed' ? '100%' : '0%';
-            text('gd-scan-current', {completed:'Scan complete.', cancelled:'Stopped.', error:'Scan failed.'}[status] || 'No scan running');
+            text('gd-scan-current', s.resumable ? 'Paused — Start Scan resumes the saved page.' : ({completed:'Scan complete.', cancelled:'Stopped.', error:'Scan failed.'}[status] || 'No scan running'));
             error('gd-scan-error', s.error || ''); stopPolling();
         }
     }
@@ -187,13 +196,15 @@
     function initGDriveTools() {
         configReady = loadConfig().catch(exc => { error('gdi-error', exc.message); text('gdi-hint', 'Could not load source settings.'); });
         el('gdi-connect').addEventListener('click', () => browse(current));
-        el('gdi-root').addEventListener('click', () => browse(config.root_path));
-        el('gdi-up').addEventListener('click', () => {
+        el('gdi-root').addEventListener('click', async () => { if (await ready()) await browse(config.root_path); });
+        el('gdi-up').addEventListener('click', async () => {
+            if (!await ready()) return;
             const parent = current.replace(/[^/]+\/$/, '');
             if (parent.startsWith(config.root_path)) browse(parent);
         });
         el('gdi-more').addEventListener('click', () => browse(current, true));
-        el('gdi-current').addEventListener('change', event => {
+        el('gdi-current').addEventListener('change', async event => {
+            if (!await ready()) return;
             if (event.target.checked) selected.add(current); else selected.delete(current);
             changed();
         });

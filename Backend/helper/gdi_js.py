@@ -362,6 +362,50 @@ async def discover(config, folders, includes=None, excludes=None, cancelled=None
     return files
 
 
+async def discover_pages(config, folders, includes=None, excludes=None, checkpoint=None):
+    """Stream bounded pages, yielding the next cursor only after a complete listing.
+
+    The consumer persists that cursor after indexing the page. Uncommitted pages
+    are safely retried using stable stream IDs; signed URLs are never persisted.
+    """
+    from Backend.helper.gdrive_source import _apply_filters, is_video_filename, parse_filter_tokens
+    selected = config.selections(folders)
+    if not selected:
+        raise GDIError("Choose and save at least one folder in Tools before scanning.")
+    includes, excludes = parse_filter_tokens(includes), parse_filter_tokens(excludes)
+    state = checkpoint or {"queue": selected, "token": None, "index": 0,
+                           "tokens": [], "pages": 0, "files": 0}
+    async with GDIClient(config) as client:
+        while state["queue"]:
+            if state["pages"] >= MAX_PAGES:
+                raise GDIError("Scan reached 1,000 API pages. Select smaller folders and scan again.")
+            path = state["queue"][0]
+            page = await client.list_page(path, state["token"], state["index"])
+            queue, files, seen = list(state["queue"]), [], set()
+            for item in page["items"]:
+                text = unquote(item["path"])
+                if not _apply_filters(text, [], excludes):
+                    continue
+                if item["is_folder"]:
+                    if item["path"] not in queue:
+                        queue.append(item["path"])
+                elif is_video_filename(item["name"]) and _apply_filters(text, includes, excludes) and item["path"] not in seen:
+                    seen.add(item["path"])
+                    files.append({**item, "url": config.origin + item["path"], "kind": "gdi_js"})
+            token = page["next_page_token"]
+            if token and token in state["tokens"]:
+                raise GDIError("GDI-JS repeated a page token; scan stopped to avoid a loop.")
+            if len(queue) > MAX_FILES or state["files"] + len(files) > MAX_FILES:
+                raise GDIError("Scan exceeded 50,000 files/folders. Select smaller folders.")
+            following = {"queue": queue if token else queue[1:], "token": token,
+                         "index": state["index"] + 1 if token else 0,
+                         "tokens": state["tokens"] + [token] if token else [],
+                         "pages": state["pages"] + 1, "files": state["files"] + len(files)}
+            yield files, following, path
+            state = following
+            await asyncio.sleep(0)
+
+
 def media_opener(settings):
     config = config_from_settings(settings)
 

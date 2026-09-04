@@ -32,10 +32,11 @@ async function test() {
     const doc = {getElementById(id){ assert(nodes.has(id), 'Missing real template ID: '+id); return nodes.get(id); },createElement(tag){return new Node(tag);}};
     let saved=[], status={status:'idle',counters:{}}, startCount=0, browseError=false;
     const network=[], intervals=new Map(); let seq=0;
+    let releaseConfig; const configGate=new Promise(resolve=>{releaseConfig=resolve;});
     const fetch = async (url, options) => {
         network.push([url,options.method]);
         let body=options.body ? JSON.parse(options.body) : null, data={}, ok=true;
-        if (url.endsWith('/gdrive-folders/config')) data={source_type:'gdi_js',root_path:'/0:/',selected_folders:saved};
+        if (url.endsWith('/gdrive-folders/config')) { await configGate; data={source_type:'gdi_js',root_path:'/0:/',selected_folders:saved}; }
         else if (url.endsWith('/gdrive-folders/browse')) {
             if (browseError) { ok=false; data={detail:'Index login is required.'}; }
             else if (body.path==='/0:/') data={path:body.path,folders:body.page_token ? [{name:'More',path:'/0:/More/'}] : [{name:'Movies',path:'/0:/Movies/'},{name:'Anime',path:'/0:/Anime/'}], next_page_token:body.page_token ? null : 'page2', page_index:body.page_index};
@@ -52,7 +53,11 @@ async function test() {
     vm.createContext(context); vm.runInContext(source,context);
     const controls=context.window, get=id=>nodes.get(id), settle=()=>new Promise(setImmediate);
     for (const name of ['initGDriveTools','startGDriveScan','confirmGDriveRescan','cancelGDriveScan','pollGDriveScan']) assert.equal(typeof controls[name],'function');
-    controls.initGDriveTools(); await settle();
+    controls.initGDriveTools();
+    const earlyRoot=get('gdi-root').event('click'), earlyUp=get('gdi-up').event('click');
+    const earlyConnect=get('gdi-connect').event('click'); await settle();
+    assert(!network.some(([url])=>url.endsWith('/gdrive-folders/browse')), 'Wait for config before browsing');
+    releaseConfig(); await earlyRoot; await earlyUp; await earlyConnect; await settle();
     assert.equal(get('gdi-controls').hidden,false);
     await controls.startGDriveScan('scan');
     assert.equal(startCount,0);

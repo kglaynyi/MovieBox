@@ -1771,7 +1771,7 @@ async def update_settings_api(payload: dict) -> dict:
     except ValueError as exc:
         raise HTTPException(400, str(exc) if isinstance(exc, GDIError) else "Invalid GDI-JS settings.") from None
     gdi_keys = {"gdrive_source_type", "gdrive_index_url", "gdrive_index_username",
-                "gdrive_index_password", "gdrive_selected_folders"}
+                "gdrive_index_password", "gdrive_selected_folders", "gdrive_include_filters", "gdrive_exclude_filters"}
     if gdrive_scan_manager.get_status()["is_running"] and any(
         key in payload and payload[key] != current.get(key) for key in gdi_keys
     ):
@@ -2307,6 +2307,7 @@ async def cancel_gdrive_scan_api() -> dict:
 
 
 async def gdrive_scan_status_api() -> dict:
+    await gdrive_scan_manager.restore_checkpoint()
     return {"status": "success", "data": gdrive_scan_manager.get_status()}
 
 

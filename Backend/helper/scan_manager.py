@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import time
 from typing import Any, Dict, List, Optional
 
@@ -860,7 +862,7 @@ class GDriveScanManager:
             "status": s["status"],
             "mode": s["mode"],
             "is_running": s["status"] == "running",
-            "resumable": False,
+            "resumable": bool(getattr(self, "_checkpoint", None)),
             "phase": s["phase"],
             "discovery_pages": s["discovery_pages"],
             "discovery_files": s["discovery_files"],
@@ -881,6 +883,12 @@ class GDriveScanManager:
         async with self._lock:
             if self.state["status"] == "running":
                 return {"ok": False, "message": "A Google Drive scan is already running."}
+            await self.restore_checkpoint()
+            self._settings = SettingsManager.current()
+            self._scan_signature = self._signature()
+            self._resume_requested = mode == "scan"
+            if mode == "scan" and getattr(self, "_checkpoint", None):
+                mode = self._resume_mode
             self.state = self._blank_state()
             self.state["status"] = "running"
             self.state["mode"] = mode
@@ -894,7 +902,15 @@ class GDriveScanManager:
         if self.state["status"] != "running":
             return {"ok": False, "message": "No Google Drive scan is currently running."}
         self._cancel = True
-        return {"ok": True, "message": "Stop requested — finishing current item."}
+        if self._task:
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
+        self.state["status"] = "cancelled"
+        self.state["finished_at"] = _now()
+        return {"ok": True, "message": "Stopped. Start Scan resumes the last saved GDI-JS page."}
 
     async def _stream_id_exists(self, stream_id: str) -> bool:
         for i in range(1, self._db.current_db_index + 1):
@@ -908,46 +924,79 @@ class GDriveScanManager:
         return False
 
 
+    def _signature(self):
+        settings = SettingsManager.current()
+        values = [settings.gdrive_source_type, settings.gdrive_index_url,
+                  settings.gdrive_selected_folders, settings.gdrive_include_filters,
+                  settings.gdrive_exclude_filters]
+        return hashlib.sha256(json.dumps(values, sort_keys=True).encode()).hexdigest()
+
+    async def restore_checkpoint(self):
+        if self.state["status"] == "running":
+            return
+        self._checkpoint = None
+        tracking = self._db.dbs.get("tracking") if self._db is not None else None
+        if tracking is not None and SettingsManager.current().gdrive_source_type == "gdi_js":
+            doc = await tracking["state"].find_one({"_id": "gdi_scan_cursor"})
+            if doc and doc.get("signature") == self._signature() and doc.get("cursor", {}).get("queue"):
+                self._checkpoint = doc["cursor"]
+                self._resume_mode = doc.get("mode", "scan")
+
+    async def _save_cursor(self, cursor):
+        tracking = self._db.dbs.get("tracking") if self._db is not None else None
+        if tracking is not None:
+            await tracking["state"].update_one({"_id": "gdi_scan_cursor"},
+                {"$set": {"signature": getattr(self, "_scan_signature", self._signature()),
+                          "cursor": cursor, "mode": self.state["mode"]}}, upsert=True)
+        self._checkpoint = cursor if cursor.get("queue") else None
+
+    async def _iter_files(self, settings):
+        s = self.state
+        s["phase"] = "discovery"
+        if settings.gdrive_source_type != "gdi_js":
+            files = await discover_gdrive_files(
+                index_url=settings.gdrive_index_url, folder_url=settings.gdrive_folder_url,
+                include_filters=settings.gdrive_include_filters, exclude_filters=settings.gdrive_exclude_filters)
+            s["current_target_id"] = len(files)
+            s["counters"]["total_found"] = len(files)
+            s["phase"] = "indexing"
+            for item in files:
+                if self._cancel:
+                    return
+                yield item
+            return
+        from Backend.helper.gdi_js import GDIError, config_from_settings, discover_pages
+        config = config_from_settings(settings)
+        selected = config.selections(settings.gdrive_selected_folders)
+        if not selected:
+            raise GDIError("Choose and save at least one folder in Tools before scanning.")
+        cursor = getattr(self, "_checkpoint", None) if getattr(self, "_resume_requested", s["mode"] != "rescan") else None
+        cursor = cursor or {"queue": selected, "token": None, "index": 0,
+                            "tokens": [], "pages": 0, "files": 0}
+        await self._save_cursor(cursor)
+        async for files, following, folder in discover_pages(
+                config, selected, settings.gdrive_include_filters,
+                settings.gdrive_exclude_filters, checkpoint=cursor):
+            s.update(phase="indexing", discovery_pages=following["pages"],
+                     discovery_files=following["files"], discovery_folder=folder)
+            s["counters"]["total_found"] = following["files"]
+            errors_before = s["counters"]["errors"]
+            for item in files:
+                if self._cancel:
+                    return
+                yield item
+            if s["counters"]["errors"] > errors_before:
+                raise GDIError("Some files failed to index. Start Scan retries this page; existing media is preserved.")
+            await self._save_cursor(following)
+            s["phase"] = "discovery"
+
     async def _run(self) -> None:
         s = self.state
         try:
-            settings = SettingsManager.current()
-            s["phase"] = "discovery"
-            if settings.gdrive_source_type == "gdi_js":
-                from Backend.helper.gdi_js import config_from_settings, discover
-
-                def discovery_progress(pages, count, folder):
-                    s.update(discovery_pages=pages, discovery_files=count, discovery_folder=folder)
-
-                files = await discover(
-                    config_from_settings(settings), settings.gdrive_selected_folders,
-                    settings.gdrive_include_filters, settings.gdrive_exclude_filters,
-                    cancelled=lambda: self._cancel, progress=discovery_progress,
-                )
-            else:
-                files = await discover_gdrive_files(
-                    index_url=settings.gdrive_index_url,
-                    folder_url=settings.gdrive_folder_url,
-                    include_filters=settings.gdrive_include_filters,
-                    exclude_filters=settings.gdrive_exclude_filters,
-                )
-            if self._cancel:
-                s["status"] = "cancelled"
-                s["finished_at"] = _now()
-                return
-            s["phase"] = "indexing"
-            s["counters"]["total_found"] = len(files)
-            s["current_target_id"] = len(files)
-            if not files:
-                s["status"] = "error"
-                s["error"] = "No matching videos found. Check the source, selected folders and include/exclude filters in Settings."
-                s["finished_at"] = _now()
-                return
-
-            # Rescan refreshes discovered sources in place. Never purge the
-            # existing library: discovery may be partial, fail, or be cancelled.
-
-            for idx, f in enumerate(files, start=1):
+            settings = getattr(self, "_settings", SettingsManager.current())
+            idx = 0
+            async for f in self._iter_files(settings):
+                idx += 1
                 if self._cancel:
                     break
                 s["current_id"] = idx
@@ -1004,6 +1053,11 @@ class GDriveScanManager:
                     await asyncio.sleep(0)
 
             s["status"] = "cancelled" if self._cancel else "completed"
+            if not idx and not self._cancel:
+                s["error"] = "No matching videos found. Check source folders and filename filters."
+            s["finished_at"] = _now()
+        except asyncio.CancelledError:
+            s["status"] = "cancelled"
             s["finished_at"] = _now()
         except Exception as e:
             s["status"] = "error"

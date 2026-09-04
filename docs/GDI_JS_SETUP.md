@@ -46,10 +46,22 @@ reused. Do not deploy an unreviewed moving branch accidentally.
   in the indexed library. A forged addon path cannot use server credentials to
   read an arbitrary file in the index.
   Movie/episode stream-ID indexes are created to keep this lookup efficient.
-- Discovery shows pages/videos found; indexing shows processed totals. Login,
+- Discovery shows pages/videos found; indexing shows processed counts. Login,
   network, API, limit and selection failures are visible instead of silently idle.
-- Failed discovery and cancellation preserve existing media. A failed MongoDB
+- Failed discovery and cancellation preserve existing media and completed pages. A failed MongoDB
   settings save no longer reports a successful in-memory-only save.
+
+## Final review fixes
+
+- WebDAV forwards the GDI-JS source kind and uses the same fresh-link resolution
+  and indexed-media authorization as Stremio playback. Callers with a stream ID
+  can also infer the source kind.
+- Folder navigation waits for source settings to load, including early clicks on
+  slow connections. A failed load gives an actionable error.
+- Restoring settings with a different index origin clears the old saved index
+  password; re-enter the new index account afterward. A same-origin restore
+  preserves it. Stop an active Drive scan before importing configuration.
+- GitHub regression checks now cover Python 3.11 and 3.12 plus scanner JavaScript.
 
 ## Credential and network handling
 
@@ -80,8 +92,15 @@ are not included in this repository.
   requests at 35 seconds. Hitting a cap reports an error, not false completion.
 - The worker is path-based: duplicate names in the same Google Drive folder and
   names containing unsafe path separators are not disambiguated by this adapter.
-- Folder selections persist, but an in-progress Drive scan cursor does not yet
-  survive a dyno restart. Start Scan skips known stable IDs when run again.
+- Folder selections and the current scan page persist in MongoDB. **Start Scan**
+  resumes an interrupted job with the same root, selections and filters; a changed
+  selection starts a fresh traversal. **Full Rescan** explicitly restarts from the
+  selected roots. Failed indexing retries the current page without deleting media.
+  The last page can be replayed after interruption; stable IDs prevent duplicates.
+- Scanning indexes one API page at a time instead of buffering the entire drive.
+  Saved media metadata is reused by new-file scans. Listings are refreshed to find
+  new files; expiring download links and session cookies are never persisted.
+  Progress counters show the current run; they are not lifetime totals.
 - Filename-to-metadata matching is unchanged. If discovery succeeds but
   **Skipped (meta)** rises, check filenames/TMDB/TVDB configuration separately.
 - The live index could not be opened by the available web checker. No actual
