@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-import ipaddress
 import re
 from html import unescape
 from typing import Any
-from urllib.parse import parse_qs, urljoin, urlparse
+from urllib.parse import parse_qs, urljoin, urlparse, urldefrag, unquote
 
 import httpx
+
+from Backend.helper.remote_http import open_remote, public_url, read_text
 
 VIDEO_EXTENSIONS = {
     ".mkv", ".mp4", ".avi", ".mov", ".m4v", ".webm", ".ts", ".m2ts", ".wmv", ".flv",
@@ -37,36 +38,15 @@ def is_video_filename(name: str) -> bool:
     return any(lower.endswith(ext) for ext in VIDEO_EXTENSIONS)
 
 
-def _is_private_host(hostname: str) -> bool:
-    if not hostname:
-        return True
-    h = hostname.lower().strip("[]")
-    if h in {"localhost", "127.0.0.1", "::1"}:
-        return True
-    try:
-        ip = ipaddress.ip_address(h)
-    except ValueError:
-        return False
-    return bool(ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast)
-
-
 def is_safe_remote_url(url: str) -> bool:
-    try:
-        p = urlparse(str(url).strip())
-    except Exception:
-        return False
-    if p.scheme not in ("http", "https"):
-        return False
-    if not p.netloc:
-        return False
-    return not _is_private_host(p.hostname or "")
+    return public_url(url)
 
 
 def _extract_name_from_href(href: str) -> str:
     path = (urlparse(href).path or "").rstrip("/")
     if not path:
         return ""
-    return path.rsplit("/", 1)[-1]
+    return unquote(path.rsplit("/", 1)[-1])
 
 
 def _apply_filters(path_text: str, includes: list[str], excludes: list[str]) -> bool:
@@ -80,6 +60,8 @@ def _apply_filters(path_text: str, includes: list[str], excludes: list[str]) -> 
 
 def normalize_drive_download_url(url: str) -> str:
     p = urlparse(url)
+    if (p.hostname or "").lower() not in {"drive.google.com", "www.drive.google.com"}:
+        return url
     qs = parse_qs(p.query or "")
     file_id = None
     m = _DRIVE_FILE_ID_RE.search(p.path or "")
@@ -94,6 +76,8 @@ def normalize_drive_download_url(url: str) -> str:
 
 def extract_drive_folder_id(url: str) -> str | None:
     p = urlparse(url or "")
+    if (p.hostname or "").lower() not in {"drive.google.com", "www.drive.google.com"}:
+        return None
     m = _DRIVE_FOLDER_ID_RE.search(p.path or "")
     if m:
         return m.group(1)
@@ -104,9 +88,7 @@ def extract_drive_folder_id(url: str) -> str | None:
 
 
 async def _fetch_text(client: httpx.AsyncClient, url: str) -> str:
-    resp = await client.get(url)
-    resp.raise_for_status()
-    return resp.text or ""
+    return await read_text(client, url)
 
 
 async def _crawl_index(
@@ -120,6 +102,7 @@ async def _crawl_index(
     queue = [root_url]
     visited: set[str] = set()
     root_host = urlparse(root_url).netloc.lower()
+    root_path = urlparse(root_url).path.rstrip("/") + "/"
 
     while queue and len(visited) < max_pages:
         url = queue.pop(0)
@@ -129,28 +112,31 @@ async def _crawl_index(
         try:
             html = await _fetch_text(client, url)
         except Exception:
+            if url == root_url:
+                raise
             continue
 
         for href_raw, label_html in _A_HREF_RE.findall(html):
             href_raw = unescape(href_raw or "").strip()
             if not href_raw or href_raw.startswith(("javascript:", "mailto:", "#")):
                 continue
-            full = urljoin(url, href_raw)
+            full = urldefrag(urljoin(url, href_raw))[0]
             if not is_safe_remote_url(full):
                 continue
             name = unescape(re.sub(r"<[^>]*>", "", label_html or "")).strip() or _extract_name_from_href(full)
             path_text = f"{full} {name}"
-            if not _apply_filters(path_text, include_filters, exclude_filters):
+            if not _apply_filters(path_text, [], exclude_filters):
                 continue
 
             parsed = urlparse(full)
             if parsed.netloc.lower() == root_host and (href_raw.endswith("/") or parsed.path.endswith("/")):
-                if full not in visited:
+                # Stay within the selected folder and visit each directory once.
+                if parsed.path.startswith(root_path) and full not in visited and full not in queue:
                     queue.append(full)
                 continue
 
             normalized = normalize_drive_download_url(full)
-            if is_video_filename(name):
+            if is_video_filename(name) and _apply_filters(path_text, include_filters, exclude_filters):
                 files.append({"name": name, "url": normalized, "path": full, "size_bytes": 0})
     return files
 
@@ -198,7 +184,7 @@ async def discover_gdrive_files(
     discovered: list[dict] = []
     seen = set()
 
-    async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+    async with httpx.AsyncClient(timeout=30.0, trust_env=False) as client:
         idx = (index_url or "").strip()
         if idx and is_safe_remote_url(idx):
             for item in await _crawl_index(client, idx, include, exclude):
@@ -225,17 +211,19 @@ async def discover_gdrive_files(
 async def check_remote_stream_alive(url: str) -> bool | None:
     if not is_safe_remote_url(url):
         return False
-    headers = {"Range": "bytes=0-0", "User-Agent": "MovieBox/1.0"}
     try:
-        async with httpx.AsyncClient(timeout=25.0, follow_redirects=True) as client:
-            resp = await client.get(url, headers=headers)
-            if resp.status_code in (200, 206):
-                return True
-            if resp.status_code in (401, 403):
+        async with httpx.AsyncClient(timeout=25.0, trust_env=False) as client:
+            resp = await open_remote(client, "GET", url, {"Range": "bytes=0-0", "User-Agent": "MovieBox/1.0"})
+            try:
+                if resp.status_code in (200, 206):
+                    mime = resp.headers.get("content-type", "").split(";", 1)[0].lower()
+                    return None if mime in {"text/html", "application/json", "text/plain"} else True
+                if resp.status_code in (404, 410):
+                    return False
+                # Access/quota/rate limits and transient server errors are not
+                # evidence that a file was removed. Never purge on these results.
                 return None
-            if resp.status_code == 405:
-                h = await client.head(url)
-                return h.status_code in (200, 206)
-            return False
+            finally:
+                await resp.aclose()
     except Exception:
         return None

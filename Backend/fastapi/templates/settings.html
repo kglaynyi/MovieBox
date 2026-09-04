@@ -375,21 +375,6 @@
                     placeholder="https://your-domain.com">
             </div>
         </div>
-        <hr class="divider">
-        <div class="grid-2">
-            <div>
-                <label class="s-label" for="upstream_repo">Upstream Repo</label>
-                <input type="text" id="upstream_repo" class="s-input"
-                    value="{{ settings.upstream_repo }}"
-                    placeholder="https://github.com/user/repo">
-            </div>
-            <div>
-                <label class="s-label" for="upstream_branch">Upstream Branch</label>
-                <input type="text" id="upstream_branch" class="s-input"
-                    value="{{ settings.upstream_branch }}"
-                    placeholder="main">
-            </div>
-        </div>
     </div>
 
     <!-- ── Poster Provider ─────────────────────────────────────────────── -->
@@ -1218,7 +1203,7 @@ document.addEventListener('DOMContentLoaded', sessLoadStatus);
         <i class="fa-solid fa-arrows-rotate fa-spin" style="font-size:2.5rem;color:var(--primary)"></i>
         <h3 style="font-size:1.25rem;font-weight:800;margin-top:1rem;color:#fff">Restarting…</h3>
         <p id="restart-overlay-msg" style="margin-top:0.5rem;font-size:0.9rem;color:rgba(255,255,255,0.75)">
-            Applying updates and bringing the server back online. Please wait.
+            Restarting the deployed version. Please wait.
         </p>
     </div>
 </div>
@@ -1535,8 +1520,6 @@ async function saveSettings() {
         fanart_shuffle:                document.getElementById('fanart_shuffle').checked,
         fanart_shuffle_interval:       parseInt(document.getElementById('fanart_shuffle_interval').value, 10) || 0,
         fanart_low_res_poster:         document.getElementById('fanart_low_res_poster').checked,
-        upstream_repo:                 document.getElementById('upstream_repo').value.trim(),
-        upstream_branch:               document.getElementById('upstream_branch').value.trim(),
         auth_channels:                 collectList('auth_channels'),
         anime_channels:                collectAnimeChannels(),
         subscription:                  document.getElementById('subscription').checked,
@@ -1691,8 +1674,6 @@ function renderSettings(s) {
     document.getElementById('fanart_low_res_poster').checked = (s.fanart_low_res_poster ?? true);
     togglePosterProvider();
     toggleFanartShuffle();
-    document.getElementById('upstream_repo').value = s.upstream_repo || '';
-    document.getElementById('upstream_branch').value = s.upstream_branch || '';
     document.getElementById('subscription_group_id').value = s.subscription_group_id || 0;
     document.getElementById('http_proxy_url').value = s.http_proxy_url || '';
     document.getElementById('mediaflow_proxy').checked = !!s.mediaflow_proxy;
@@ -1867,7 +1848,7 @@ function toggleLiveLogs() {
 }
 
 async function restartApp() {
-    if (!confirm('Restart the app now? It will pull the latest code and be unreachable for a few seconds.')) return;
+    if (!confirm('Restart the deployed version now? Active streams will be interrupted. No code will be downloaded.')) return;
 
     let before = null;
     try { before = (await (await fetch('/api/admin/health')).json()).start_time; } catch (e) {}

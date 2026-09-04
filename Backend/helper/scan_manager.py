@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import time
-from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from pyrogram.errors import FloodWait, ChannelPrivate, ChatAdminRequired
@@ -18,6 +17,7 @@ from Backend.helper.metadata import metadata, extract_default_id
 from Backend.helper.pyro import clean_filename, finalize_media_name, get_readable_file_size
 from Backend.helper.skip_channel import is_skip_channel, route_to_skip_channel
 from Backend.helper.split_files import parse_split_info
+from Backend.helper.settings_manager import SettingsManager
 from Backend.helper.subtitles import ingest_subtitle, is_subtitle_file
 
 SCAN_BATCH_SIZE = 200          
@@ -899,78 +899,11 @@ class GDriveScanManager:
                 return True
         return False
 
-    async def _purge_existing_gdrive_entries(self) -> int:
-        removed = 0
-        for i in range(1, self._db.current_db_index + 1):
-            storage = self._db.dbs.get(f"storage_{i}")
-            if storage is None:
-                continue
-            movies = await storage["movie"].find({}, {"telegram": 1, "tmdb_id": 1}).to_list(length=None)
-            for movie in movies:
-                keep = []
-                changed = False
-                for q in movie.get("telegram") or []:
-                    sid = q.get("id")
-                    is_gdrive = (q.get("source") == "gdrive")
-                    if not is_gdrive and sid:
-                        try:
-                            decoded = await decode_string(sid)
-                            is_gdrive = isinstance(decoded, dict) and decoded.get("source") == "gdrive"
-                        except Exception:
-                            is_gdrive = False
-                    if is_gdrive:
-                        removed += 1
-                        changed = True
-                    else:
-                        keep.append(q)
-                if changed:
-                    if keep:
-                        movie["telegram"] = keep
-                        movie["updated_on"] = datetime.utcnow()
-                        await storage["movie"].replace_one({"_id": movie["_id"]}, movie)
-                    else:
-                        await storage["movie"].delete_one({"_id": movie["_id"]})
-                        await self._db.purge_media_from_catalogs(movie.get("tmdb_id"), "movie")
-
-            shows = await storage["tv"].find({}, {"seasons": 1, "tmdb_id": 1}).to_list(length=None)
-            for show in shows:
-                tv_changed = False
-                for season in show.get("seasons") or []:
-                    season_eps = []
-                    for ep in season.get("episodes") or []:
-                        keep_q = []
-                        for q in ep.get("telegram") or []:
-                            sid = q.get("id")
-                            is_gdrive = (q.get("source") == "gdrive")
-                            if not is_gdrive and sid:
-                                try:
-                                    decoded = await decode_string(sid)
-                                    is_gdrive = isinstance(decoded, dict) and decoded.get("source") == "gdrive"
-                                except Exception:
-                                    is_gdrive = False
-                            if is_gdrive:
-                                removed += 1
-                                tv_changed = True
-                                continue
-                            keep_q.append(q)
-                        ep["telegram"] = keep_q
-                        if ep.get("telegram"):
-                            season_eps.append(ep)
-                    season["episodes"] = season_eps
-                show["seasons"] = [s for s in (show.get("seasons") or []) if s.get("episodes")]
-                if tv_changed:
-                    if show["seasons"]:
-                        show["updated_on"] = datetime.utcnow()
-                        await storage["tv"].replace_one({"_id": show["_id"]}, show)
-                    else:
-                        await storage["tv"].delete_one({"_id": show["_id"]})
-                        await self._db.purge_media_from_catalogs(show.get("tmdb_id"), "tv")
-        return removed
 
     async def _run(self) -> None:
         s = self.state
-        settings = SettingsManager.current()
         try:
+            settings = SettingsManager.current()
             files = await discover_gdrive_files(
                 index_url=settings.gdrive_index_url,
                 folder_url=settings.gdrive_folder_url,
@@ -985,8 +918,8 @@ class GDriveScanManager:
                 s["finished_at"] = _now()
                 return
 
-            if s["mode"] == "rescan":
-                await self._purge_existing_gdrive_entries()
+            # Rescan refreshes discovered sources in place. Never purge the
+            # existing library: discovery may be partial, fail, or be cancelled.
 
             for idx, f in enumerate(files, start=1):
                 if self._cancel:

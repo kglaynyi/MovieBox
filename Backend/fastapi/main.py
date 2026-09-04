@@ -151,6 +151,17 @@ app = FastAPI(
 )
 
 #----- Middleware
+app.state.services_ready = False
+
+
+@app.middleware("http")
+async def startup_gate(request: Request, call_next):
+    if not app.state.services_ready:
+        return JSONResponse({"status": "starting", "message": "Services are initializing. Try again shortly."},
+                            status_code=503, headers={"Retry-After": "5"})
+    return await call_next(request)
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

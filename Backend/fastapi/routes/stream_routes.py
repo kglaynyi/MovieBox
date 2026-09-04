@@ -11,14 +11,14 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fastapi.responses import Response as PlainResponse
 from fastapi.responses import StreamingResponse
-import httpx
+from Backend.helper.remote_stream import remote_media_response
 
 from Backend import db
-from Backend.fastapi.security.tokens import verify_token
+from Backend.fastapi.security.tokens import require_stream_token
+from Backend.fastapi.security.credentials import require_auth
 from Backend.helper.analytics import client_ip_from, record_stream_start
 from Backend.helper.custom_dl import ACTIVE_STREAMS, RECENT_STREAMS, ByteStreamer
 from Backend.helper.encrypt import decode_string
-from Backend.helper.gdrive_source import is_safe_remote_url
 from Backend.helper.utils import track_usage
 from Backend.helper.virtual_dl import resolve_virtual_parts, virtual_stream_generator
 from Backend.helper.zip_stream import resolve_zip_entry
@@ -227,7 +227,7 @@ _SUBTITLE_MIME = {
 
 #----- Serve a subtitle file fully in-memory (files are small)
 @router.get("/sub/{token}/{id}/{name}")
-async def subtitle_handler(token: str, id: str, name: str, token_data: dict = Depends(verify_token)):
+async def subtitle_handler(token: str, id: str, name: str, token_data: dict = Depends(require_stream_token)):
     try:
         decoded = await decode_string(id)
         chat_id = int(f"-100{decoded['chat_id']}")
@@ -258,7 +258,7 @@ async def subtitle_handler(token: str, id: str, name: str, token_data: dict = De
 #----- Entry point: decode the id and dispatch to the matching streamer
 @router.get("/dl/{token}/{id}/{name}")
 @router.head("/dl/{token}/{id}/{name}")
-async def stream_handler(request: Request, token: str, id: str, name: str, token_data: dict = Depends(verify_token)):
+async def stream_handler(request: Request, token: str, id: str, name: str, token_data: dict = Depends(require_stream_token)):
     if request.method != "HEAD":
         asyncio.create_task(record_stream_start(
             token,
@@ -322,51 +322,29 @@ async def gdrive_media_streamer(
     token_data: dict | None = None,
     stream_id_hash: str | None = None,
 ):
-    if not source_url or not is_safe_remote_url(source_url):
-        raise HTTPException(status_code=400, detail="Invalid Google Drive source URL")
+    stream_id = secrets.token_hex(8)
+    started = time.time()
+    info = {"stream_id": stream_id, "source": "gdrive", "status": "active",
+            "total_bytes": 0, "start_ts": started,
+            "meta": {"title": source_name, "token": token,
+                     "user_name": (token_data or {}).get("name", "Unknown")}}
 
-    range_header = request.headers.get("Range", "")
-    upstream_headers = {"User-Agent": "MovieBox/1.0"}
-    if range_header:
-        upstream_headers["Range"] = range_header
+    def count_bytes(size):
+        info["total_bytes"] += size
+        info["avg_mbps"] = info["total_bytes"] / (1024 ** 2) / max(time.time() - started, 0.001)
 
-    async def _stream():
-        async with httpx.AsyncClient(timeout=90.0, follow_redirects=True) as client:
-            async with client.stream("GET", source_url, headers=upstream_headers) as resp:
-                if resp.status_code >= 400:
-                    raise HTTPException(status_code=404, detail="Remote source unavailable")
-                async for chunk in resp.aiter_bytes(chunk_size=256 * 1024):
-                    yield chunk
+    def finished():
+        info["end_ts"] = time.time()
+        info["duration"] = info["end_ts"] - started
+        info["status"] = "finished"
+        ACTIVE_STREAMS.pop(stream_id, None)
+        RECENT_STREAMS.appendleft(info)
 
-    async with httpx.AsyncClient(timeout=45.0, follow_redirects=True) as probe_client:
-        probe_method = "HEAD" if request.method == "HEAD" else "GET"
-        probe_headers = dict(upstream_headers)
-        if request.method != "HEAD":
-            probe_headers["Range"] = probe_headers.get("Range", "bytes=0-0")
-        probe = await probe_client.request(probe_method, source_url, headers=probe_headers)
-        if probe.status_code == 405 and probe_method == "HEAD":
-            probe = await probe_client.get(source_url, headers={"Range": "bytes=0-0", "User-Agent": "MovieBox/1.0"})
-        if probe.status_code >= 400:
-            raise HTTPException(status_code=404, detail="Remote source unavailable")
-
-        file_name = source_name or unquote(request.path_params.get("name", "")) or "video.mkv"
-        mime_type = (probe.headers.get("content-type") or mimetypes.guess_type(file_name)[0] or "application/octet-stream")
-        headers = {
-            "Content-Type": mime_type,
-            "Content-Disposition": _content_disposition(file_name),
-            "Accept-Ranges": probe.headers.get("accept-ranges", "bytes"),
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Expose-Headers": "Content-Length, Content-Range, Accept-Ranges",
-            "Cache-Control": "public, max-age=1800",
-        }
-        for key in ("content-length", "content-range"):
-            if probe.headers.get(key):
-                headers[key.title()] = probe.headers.get(key)
-        status = 206 if headers.get("Content-Range") else 200
-        if request.method == "HEAD":
-            return PlainResponse(status_code=status, headers=headers)
-    return StreamingResponse(_stream(), status_code=status, headers=headers)
-
+    response = await remote_media_response(request, source_url, source_name, count_bytes, finished)
+    if isinstance(response, StreamingResponse):
+        ACTIVE_STREAMS[stream_id] = info
+        asyncio.create_task(track_usage(stream_id, token, token_data))
+    return response
 
 #----- Stream a single Telegram file, with optional multi-client parallelism
 async def media_streamer(request: Request, chat_id: int, msg_id: int, token: str, token_data: dict = None, stream_id_hash: str = None):
@@ -702,7 +680,7 @@ async def db_zip_media_streamer(request: Request, parts_payload: list, token: st
 
 #----- Live and recent stream telemetry, pruning stale active entries
 @router.get("/stream/stats")
-async def get_stream_stats():
+async def get_stream_stats(_: bool = Depends(require_auth)):
     now = time.time()
     PRUNE_SECONDS = 3
     INACTIVE_TIMEOUT = 15
@@ -773,7 +751,7 @@ async def get_stream_stats():
 
 #----- Detailed telemetry for a single stream id
 @router.get("/stream/stats/{stream_id}")
-async def get_stream_detail(stream_id: str):
+async def get_stream_detail(stream_id: str, _: bool = Depends(require_auth)):
     info = ACTIVE_STREAMS.get(stream_id)
     if info:
         return JSONResponse(make_json_safe(info))

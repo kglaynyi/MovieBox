@@ -1,10 +1,8 @@
 import asyncio
-import asyncio
 import json
 import os
 import random
 import secrets
-import shutil
 from datetime import datetime
 from time import time
 
@@ -1940,7 +1938,7 @@ async def update_settings_api(payload: dict) -> dict:
                     )
 
     #----- Strip whitespace from string fields
-    for key in ("tmdb_api", "base_url", "upstream_repo", "upstream_branch",
+    for key in ("tmdb_api", "base_url",
                 "admin_username", "admin_password", "session_secret", "http_proxy_url",
                 "mediaflow_password", "payment_instructions", "payment_qr_url",
                 "announcement_channel", "skip_channel", "gdrive_folder_url", "gdrive_index_url"):
@@ -2479,22 +2477,12 @@ async def download_logs_api():
     return FileResponse(path, filename="log.txt", media_type="text/plain")
 
 
-#----- Run the updater then re-exec the app; runs after the HTTP response is flushed
+#----- Restart the deployed interpreter without changing code or dependencies.
 async def _perform_restart(delay: float = 1.0) -> None:
     await asyncio.sleep(delay)
-    try:
-        LOGGER.info("Web-triggered restart: running updater...")
-        proc = await asyncio.create_subprocess_exec("uv", "run", "update.py")
-        await proc.wait()
-    except Exception as e:
-        LOGGER.error(f"Restart updater failed: {e}")
-
-    uv_path = shutil.which("uv")
-    if not uv_path:
-        LOGGER.error("Restart aborted: uv not found in PATH.")
-        return
+    import sys
     LOGGER.info("Web-triggered restart: re-executing app...")
-    os.execl(uv_path, uv_path, "run", "-m", "Backend")
+    os.execl(sys.executable, sys.executable, "-m", "Backend")
 
 
 #----- Trigger a restart from the web (was /restart)

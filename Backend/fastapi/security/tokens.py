@@ -11,6 +11,16 @@ MONTHLY_LIMIT_VIDEO = "https://bit.ly/4rfjtgd"
 SUBSCRIPTION_EXPIRED_VIDEO = "https://bit.ly/4rfjtgd"
 
 
+async def require_stream_token(token: str):
+    """Enforce access for direct playback, not only catalog discovery."""
+    data = await verify_token(token)
+    if data.get("subscription_expired"):
+        raise HTTPException(status_code=403, detail="Token or subscription expired")
+    if data.get("limit_exceeded"):
+        raise HTTPException(status_code=403, detail="Token data limit exceeded")
+    return data
+
+
 #----- Validate an API token and annotate it with subscription/limit status
 async def verify_token(token: str):
     token_data = await db.get_api_token(token)

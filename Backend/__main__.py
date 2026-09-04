@@ -33,28 +33,24 @@ loop = asyncio.get_event_loop()
 async def start_services():
     try:
         LOGGER.info(f"Initializing Telegram-Stremio v-{__version__}")
-        await asyncio.sleep(1.2)
 
         await db.connect()
-        await asyncio.sleep(1.2)
 
         await SettingsManager.initialize(db)
         app.add_middleware(SessionMiddleware, secret_key=SettingsManager.current().session_secret or secrets.token_hex(32))
-        await asyncio.sleep(0.5)
+        # Bind HTTP before slow Telegram setup. Requests stay gated until ready.
+        web_task = loop.create_task(server.serve())
 
         await scan_manager.load(db)
         dbcheck_manager.bind_db(db)
         gdrive_scan_manager.bind_db(db)
         duplicate_manager.bind_db(db)
-        await asyncio.sleep(0.3)
 
         await db.reload_extra_databases(SettingsManager.current().extra_databases)
-        await asyncio.sleep(0.5)
 
         await StreamBot.start()
         StreamBot.username = StreamBot.me.username
         LOGGER.info(f"Bot Client : [@{StreamBot.username}]")
-        await asyncio.sleep(1.2)
 
         if botmod.Userbot is None:
             stored_session = await get_active_session_string()
@@ -68,29 +64,37 @@ async def start_services():
             LOGGER.info(f"Userbot Client : [@{botmod.Userbot.username}]")
         else:
             LOGGER.info("Userbot not configured — running with StreamBot only.")
-        await asyncio.sleep(1.2)
 
         LOGGER.info("Initializing Multi Clients...")
         await initialize_clients()
-        await asyncio.sleep(2)
 
-        await setup_bot_commands(StreamBot)
-        await asyncio.sleep(2)
-
-        LOGGER.info('Initializing Telegram-Stremio Web Server...')
-        await restart_notification()
-        loop.create_task(server.serve())
+        app.state.services_ready = True
+        loop.create_task(_post_start())
         loop.create_task(ping())
 
         link_checker_task = DeadLinkChecker(db, app, check_interval_hours=24)
         loop.create_task(link_checker_task.start())
 
-        await subscription_task_manager.sync(StreamBot)
-
         LOGGER.info("Telegram-Stremio Started Successfully!")
-        await idle()
+        idle_task = loop.create_task(idle())
+        done, _ = await asyncio.wait({web_task, idle_task}, return_when=asyncio.FIRST_COMPLETED)
+        if web_task in done:
+            await web_task
+            if not server.should_exit:
+                raise RuntimeError("Web server stopped unexpectedly")
     except Exception:
         LOGGER.error("Error during startup:\n" + format_exc())
+        raise
+
+
+async def _post_start():
+    # Telegram notifications must not keep the web application from becoming ready.
+    for action in (lambda: setup_bot_commands(StreamBot), restart_notification,
+                   lambda: subscription_task_manager.sync(StreamBot)):
+        try:
+            await asyncio.wait_for(action(), timeout=20)
+        except Exception:
+            LOGGER.warning("Optional post-start task failed:\n" + format_exc())
 
 
 #----- Cancel pending tasks and shut clients down
@@ -120,6 +124,7 @@ if __name__ == '__main__':
         LOGGER.info('Service Stopping...')
     except Exception:
         LOGGER.error(format_exc())
+        raise SystemExit(1)
     finally:
         loop.run_until_complete(stop_services())
         loop.stop()

@@ -907,7 +907,7 @@ function renderScan(s) {
         }
 
         function confirmGDriveRescan() {
-            if (!confirm('Full rescan will remove previously indexed Google Drive entries and re-index from source.\n\nProceed?')) return;
+            if (!confirm('Rescan will refresh discovered Google Drive entries. Existing entries are kept if discovery or matching fails; missing files are not deleted.\n\nProceed?')) return;
             startGDriveScan('rescan');
         }
 
