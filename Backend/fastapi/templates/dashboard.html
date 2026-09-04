@@ -163,7 +163,8 @@
                     <i class="fa-solid fa-database text-primary"></i> Storage Nodes
                 </h3>
 
-                <div class="grid md:grid-cols-2 gap-4">
+                <div id="storage-nodes" class="grid md:grid-cols-2 gap-4">
+                    {% if not system_stats.databases %}<p class="text-text-secondary">Loading storage statistics…</p>{% endif %}
                     {% for db_stat in system_stats.databases %}
                     <div class="glass-panel p-6 rounded-[2rem] border-hairline bg-card/10">
                         <div class="flex justify-between items-start mb-6">
@@ -553,6 +554,7 @@
     }
 
     async function refreshDashboard() {
+        loadStreamStats();
         const icon = document.getElementById('refresh-icon');
         if (icon) icon.classList.add('animate-spin');
 
@@ -560,6 +562,22 @@
             const response = await fetch('/api/system/stats', { cache: 'no-store' });
             if (response.ok) {
                 const stats = await response.json();
+                const nodes = document.getElementById('storage-nodes');
+                if (nodes) {
+                    nodes.replaceChildren();
+                    for (const db of stats.databases || []) {
+                        const card = document.createElement('div');
+                        card.className = 'glass-panel p-6 rounded-[2rem]';
+                        const title = document.createElement('h4');
+                        title.className = 'font-bold text-text';
+                        title.textContent = db.db_name.replace('storage_', 'Node ');
+                        const detail = document.createElement('p');
+                        detail.className = 'text-sm text-text-secondary mt-4';
+                        detail.textContent = `${db.movie_count} movies / ${db.tv_count} TV · ${(db.storageSize / 1048576).toFixed(1)} MB`;
+                        card.append(title, detail);
+                        nodes.append(card);
+                    }
+                }
 
                 const elUptime = document.getElementById('sys-uptime');
                 if (elUptime) elUptime.innerText = stats.uptime || 'N/A';
@@ -572,11 +590,13 @@
 
                 const elVersion = document.getElementById('sys-version');
                 if (elVersion) elVersion.innerText = 'v' + (stats.version || '1.0.0');
+            } else {
+                throw new Error('Statistics request failed');
             }
-
-            await loadStreamStats();
         } catch (error) {
             console.error('Failed to refresh dashboard:', error);
+            const nodes = document.getElementById('storage-nodes');
+            if (nodes && nodes.textContent.includes('Loading storage statistics')) nodes.textContent = 'Storage statistics unavailable. Use Refresh to retry.';
             showToast('Dashboard refresh failed.', 'error', 'Refresh failed');
         } finally {
             setTimeout(() => { if (icon) icon.classList.remove('animate-spin'); }, 450);
@@ -584,7 +604,7 @@
     }
 
     document.addEventListener('DOMContentLoaded', () => {
-        loadStreamStats();
+        refreshDashboard();
         loadSetupStatus();
         setInterval(loadStreamStats, 30000);
         setInterval(refreshLiveDurations, 1000);
