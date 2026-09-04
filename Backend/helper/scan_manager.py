@@ -2,12 +2,18 @@ from __future__ import annotations
 
 import asyncio
 import time
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from pyrogram.errors import FloodWait, ChannelPrivate, ChatAdminRequired
 
 from Backend.logger import LOGGER
 from Backend.helper.encrypt import encode_string, decode_string
+from Backend.helper.gdrive_source import (
+    check_remote_stream_alive,
+    discover_gdrive_files,
+    is_video_filename,
+)
 from Backend.helper.metadata import metadata, extract_default_id
 from Backend.helper.pyro import clean_filename, finalize_media_name, get_readable_file_size
 from Backend.helper.skip_channel import is_skip_channel, route_to_skip_channel
@@ -647,6 +653,8 @@ class DbCheckManager:
     async def _check_message(self, client, stream_hash: str):
         try:
             decoded = await decode_string(stream_hash)
+            if isinstance(decoded, dict) and decoded.get("source") == "gdrive":
+                return await check_remote_stream_alive(str(decoded.get("url") or ""))
             if isinstance(decoded, dict) and "parts" in decoded:
                 parts = decoded.get("parts") or []
                 if not parts:
@@ -797,6 +805,250 @@ class DbCheckManager:
         self.state["purged"] = self.state.get("purged", 0) + purged
         return {"ok": True, "message": f"Purged {purged} dead entr{'y' if purged == 1 else 'ies'}.",
                 "purged": purged}
+
+
+class GDriveScanManager:
+    def __init__(self) -> None:
+        self._db = None
+        self._task: Optional[asyncio.Task] = None
+        self._cancel = False
+        self._lock = asyncio.Lock()
+        self.state: Dict[str, Any] = self._blank_state()
+
+    @staticmethod
+    def _blank_state() -> Dict[str, Any]:
+        return {
+            "status": "idle",
+            "mode": "scan",
+            "current_channel_name": "Google Drive",
+            "current_id": 0,
+            "current_target_id": 0,
+            "counters": {
+                "total_found": 0,
+                "processed": 0,
+                "indexed": 0,
+                "skipped_dup": 0,
+                "skipped_meta": 0,
+                "skipped_nonvid": 0,
+                "subtitles_added": 0,
+                "subtitles_skipped": 0,
+                "errors": 0,
+            },
+            "started_at": 0.0,
+            "updated_at": 0.0,
+            "finished_at": 0.0,
+            "error": None,
+        }
+
+    def bind_db(self, db) -> None:
+        self._db = db
+
+    def get_status(self) -> Dict[str, Any]:
+        s = self.state
+        elapsed = 0.0
+        if s["started_at"]:
+            end = s["finished_at"] or _now()
+            elapsed = max(0.0, end - s["started_at"])
+        target = int(s.get("current_target_id", 0) or 0)
+        cur = int(s.get("current_id", 0) or 0)
+        progress = max(0, min(100, round(cur / target * 100))) if target > 0 else 0
+        return {
+            "status": s["status"],
+            "mode": s["mode"],
+            "is_running": s["status"] == "running",
+            "resumable": False,
+            "current_channel_name": s["current_channel_name"],
+            "current_channel": "gdrive",
+            "current_id": cur,
+            "current_target_id": target,
+            "progress": progress,
+            "has_progress": target > 0,
+            "counters": dict(s["counters"]),
+            "elapsed": _fmt_elapsed(elapsed),
+            "elapsed_seconds": int(elapsed),
+            "error": s["error"],
+        }
+
+    async def start(self, mode: str = "scan") -> Dict[str, Any]:
+        async with self._lock:
+            if self.state["status"] == "running":
+                return {"ok": False, "message": "A Google Drive scan is already running."}
+            self.state = self._blank_state()
+            self.state["status"] = "running"
+            self.state["mode"] = mode
+            self.state["started_at"] = _now()
+            self.state["finished_at"] = 0.0
+            self._cancel = False
+            self._task = asyncio.create_task(self._run())
+            return {"ok": True, "message": "Google Drive scan started.", "status": self.get_status()}
+
+    async def cancel(self) -> Dict[str, Any]:
+        if self.state["status"] != "running":
+            return {"ok": False, "message": "No Google Drive scan is currently running."}
+        self._cancel = True
+        return {"ok": True, "message": "Stop requested — finishing current item."}
+
+    async def _stream_id_exists(self, stream_id: str) -> bool:
+        for i in range(1, self._db.current_db_index + 1):
+            storage = self._db.dbs.get(f"storage_{i}")
+            if storage is None:
+                continue
+            if await storage["movie"].find_one({"telegram.id": stream_id}, {"_id": 1}):
+                return True
+            if await storage["tv"].find_one({"seasons.episodes.telegram.id": stream_id}, {"_id": 1}):
+                return True
+        return False
+
+    async def _purge_existing_gdrive_entries(self) -> int:
+        removed = 0
+        for i in range(1, self._db.current_db_index + 1):
+            storage = self._db.dbs.get(f"storage_{i}")
+            if storage is None:
+                continue
+            movies = await storage["movie"].find({}, {"telegram": 1, "tmdb_id": 1}).to_list(length=None)
+            for movie in movies:
+                keep = []
+                changed = False
+                for q in movie.get("telegram") or []:
+                    sid = q.get("id")
+                    is_gdrive = (q.get("source") == "gdrive")
+                    if not is_gdrive and sid:
+                        try:
+                            decoded = await decode_string(sid)
+                            is_gdrive = isinstance(decoded, dict) and decoded.get("source") == "gdrive"
+                        except Exception:
+                            is_gdrive = False
+                    if is_gdrive:
+                        removed += 1
+                        changed = True
+                    else:
+                        keep.append(q)
+                if changed:
+                    if keep:
+                        movie["telegram"] = keep
+                        movie["updated_on"] = datetime.utcnow()
+                        await storage["movie"].replace_one({"_id": movie["_id"]}, movie)
+                    else:
+                        await storage["movie"].delete_one({"_id": movie["_id"]})
+                        await self._db.purge_media_from_catalogs(movie.get("tmdb_id"), "movie")
+
+            shows = await storage["tv"].find({}, {"seasons": 1, "tmdb_id": 1}).to_list(length=None)
+            for show in shows:
+                tv_changed = False
+                for season in show.get("seasons") or []:
+                    season_eps = []
+                    for ep in season.get("episodes") or []:
+                        keep_q = []
+                        for q in ep.get("telegram") or []:
+                            sid = q.get("id")
+                            is_gdrive = (q.get("source") == "gdrive")
+                            if not is_gdrive and sid:
+                                try:
+                                    decoded = await decode_string(sid)
+                                    is_gdrive = isinstance(decoded, dict) and decoded.get("source") == "gdrive"
+                                except Exception:
+                                    is_gdrive = False
+                            if is_gdrive:
+                                removed += 1
+                                tv_changed = True
+                                continue
+                            keep_q.append(q)
+                        ep["telegram"] = keep_q
+                        if ep.get("telegram"):
+                            season_eps.append(ep)
+                    season["episodes"] = season_eps
+                show["seasons"] = [s for s in (show.get("seasons") or []) if s.get("episodes")]
+                if tv_changed:
+                    if show["seasons"]:
+                        show["updated_on"] = datetime.utcnow()
+                        await storage["tv"].replace_one({"_id": show["_id"]}, show)
+                    else:
+                        await storage["tv"].delete_one({"_id": show["_id"]})
+                        await self._db.purge_media_from_catalogs(show.get("tmdb_id"), "tv")
+        return removed
+
+    async def _run(self) -> None:
+        s = self.state
+        settings = SettingsManager.current()
+        try:
+            files = await discover_gdrive_files(
+                index_url=settings.gdrive_index_url,
+                folder_url=settings.gdrive_folder_url,
+                include_filters=settings.gdrive_include_filters,
+                exclude_filters=settings.gdrive_exclude_filters,
+            )
+            s["counters"]["total_found"] = len(files)
+            s["current_target_id"] = len(files)
+            if not files:
+                s["status"] = "error"
+                s["error"] = "No files found. Set Google Drive folder or index URL in Settings."
+                s["finished_at"] = _now()
+                return
+
+            if s["mode"] == "rescan":
+                await self._purge_existing_gdrive_entries()
+
+            for idx, f in enumerate(files, start=1):
+                if self._cancel:
+                    break
+                s["current_id"] = idx
+                s["counters"]["processed"] += 1
+                name = str(f.get("name") or "").strip()
+                source_url = str(f.get("url") or "").strip()
+                if not name or not source_url:
+                    s["counters"]["errors"] += 1
+                    continue
+                if not is_video_filename(name):
+                    s["counters"]["skipped_nonvid"] += 1
+                    continue
+
+                try:
+                    payload = {"source": "gdrive", "url": source_url, "name": name}
+                    stream_id = await encode_string(payload)
+                    if (s["mode"] != "rescan") and await self._stream_id_exists(stream_id):
+                        s["counters"]["skipped_dup"] += 1
+                        continue
+
+                    metadata_info = await metadata(name, 0, 0)
+                    if not metadata_info:
+                        s["counters"]["skipped_meta"] += 1
+                        continue
+                    metadata_info["encoded_string"] = stream_id
+                    metadata_info["source"] = "gdrive"
+                    metadata_info["source_url"] = source_url
+                    metadata_info["source_path"] = str(f.get("path") or "")
+                    metadata_info["group_key"] = None
+                    metadata_info["part_number"] = None
+                    size_bytes = int(f.get("size_bytes") or 0)
+                    size = get_readable_file_size(size_bytes) if size_bytes > 0 else ""
+                    res = await self._db.insert_media(
+                        metadata_info=metadata_info,
+                        channel=0,
+                        msg_id=0,
+                        size=size,
+                        name=name,
+                        raw_size=size_bytes,
+                        status={},
+                    )
+                    if res:
+                        s["counters"]["indexed"] += 1
+                    else:
+                        s["counters"]["errors"] += 1
+                except Exception as e:
+                    LOGGER.error(f"[GDriveScan] failed for {name}: {e}")
+                    s["counters"]["errors"] += 1
+
+                if idx % SCAN_PERSIST_EVERY == 0:
+                    s["updated_at"] = _now()
+                    await asyncio.sleep(0)
+
+            s["status"] = "cancelled" if self._cancel else "completed"
+            s["finished_at"] = _now()
+        except Exception as e:
+            s["status"] = "error"
+            s["error"] = str(e)
+            s["finished_at"] = _now()
+            LOGGER.error(f"[GDriveScan] Unexpected error: {e}")
 
 
 class DuplicateManager:
@@ -1017,4 +1269,5 @@ class DuplicateManager:
 #----- ── Singletons ──────────────────────────────────────────────────────────────
 scan_manager = ScanManager()
 dbcheck_manager = DbCheckManager()
+gdrive_scan_manager = GDriveScanManager()
 duplicate_manager = DuplicateManager()

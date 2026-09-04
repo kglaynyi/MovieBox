@@ -175,6 +175,16 @@ async def _stream_video(request: Request, node: VNode, token: str, token_data: d
     sid = node.stream_id
 
     # Same dispatch order as stream_routes.stream_handler
+    if decoded.get("source") == "gdrive":
+        return await sr.gdrive_media_streamer(
+            request=request,
+            source_url=str(decoded.get("url") or ""),
+            source_name=str(decoded.get("name") or node.stream_name or "video.mkv"),
+            token=token,
+            token_data=token_data,
+            stream_id_hash=sid,
+        )
+
     if decoded.get("global"):
         if decoded.get("zip"):
             return await sr.global_zip_media_streamer(

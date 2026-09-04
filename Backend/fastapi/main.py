@@ -17,6 +17,7 @@ from Backend.fastapi.routes.api_routes import (
     auto_sync_custom_catalogs_api,
     cancel_dbcheck_api,
     cancel_duplicate_check_api,
+    cancel_gdrive_scan_api,
     cancel_scan_api,
     clear_cache_api,
     clear_stream_analytics_api,
@@ -58,6 +59,7 @@ from Backend.fastapi.routes.api_routes import (
     get_custom_catalog_items_api,
     get_dead_links_api,
     get_media_visibility_api,
+    gdrive_scan_status_api,
     get_requests_api,
     request_popular_api,
     request_search_api,
@@ -104,6 +106,7 @@ from Backend.fastapi.routes.api_routes import (
     speed_test_stream_api,
     start_dbcheck_api,
     start_duplicate_check_api,
+    start_gdrive_scan_api,
     start_scan_api,
     update_auto_catalog_settings_api,
     update_custom_catalog_api,
@@ -142,8 +145,8 @@ from Backend.pyrofork.bot import work_loads_summary
 templates = Jinja2Templates(directory="Backend/fastapi/templates")
 
 app = FastAPI(
-    title="Telegram Stremio Media Server",
-    description="A powerful, self-hosted Telegram Stremio Media Server built with FastAPI, MongoDB, and PyroFork seamlessly integrated with Stremio for automated media streaming and discovery.",
+    title="NLYNN Media Server",
+    description="A powerful, self-hosted NLYNN Media Server built with FastAPI, MongoDB, and PyroFork seamlessly integrated with Stremio for automated media streaming and discovery.",
     version=__version__
 )
 
@@ -196,9 +199,9 @@ async def pwa_manifest(request: Request):
     theme = get_theme(theme_name)
     return JSONResponse(
         {
-            "name": "Telegram Stremio",
-            "short_name": "TG Stremio",
-            "description": "Telegram Stremio media management",
+            "name": "NLYNN",
+            "short_name": "NLYNN",
+            "description": "NLYNN media management",
             "start_url": "/",
             "scope": "/",
             "display": "standalone",
@@ -811,6 +814,18 @@ async def tools_scan_cancel(_: bool = Depends(require_auth)):
 @app.get("/api/admin/tools/scan/status")
 async def tools_scan_status(_: bool = Depends(require_auth)):
     return await scan_status_api()
+
+@app.post("/api/admin/tools/gdrive-scan/start")
+async def tools_gdrive_scan_start(payload: dict | None = None, _: bool = Depends(require_auth)):
+    return await start_gdrive_scan_api(payload or {})
+
+@app.post("/api/admin/tools/gdrive-scan/cancel")
+async def tools_gdrive_scan_cancel(_: bool = Depends(require_auth)):
+    return await cancel_gdrive_scan_api()
+
+@app.get("/api/admin/tools/gdrive-scan/status")
+async def tools_gdrive_scan_status(_: bool = Depends(require_auth)):
+    return await gdrive_scan_status_api()
 
 @app.post("/api/admin/tools/dbcheck/start")
 async def tools_dbcheck_start(_: bool = Depends(require_auth)):

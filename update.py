@@ -8,6 +8,8 @@ import pytz
 import shutil
 
 IST = pytz.timezone("Asia/Kolkata")
+DEFAULT_UPSTREAM_REPO = "https://github.com/kglaynyi/MovieBox"
+DEFAULT_UPSTREAM_BRANCH = "main"
 
 class ISTFormatter(Formatter):
     def formatTime(self, record, datefmt=None):
@@ -39,7 +41,7 @@ def _fetch_upstream_from_db() -> tuple[str | None, str]:
         uris = [u.strip() for u in raw_uris.replace(",", " ").split() if u.strip()]
         if not uris:
             log_info("update.py: No DATABASE found — skipping DB settings lookup.")
-            return None, "master"
+            return None, DEFAULT_UPSTREAM_BRANCH
 
         tracking_uri = uris[0]
         client = MongoClient(tracking_uri, serverSelectionTimeoutMS=5000)
@@ -48,20 +50,20 @@ def _fetch_upstream_from_db() -> tuple[str | None, str]:
 
         if doc:
             repo   = (doc.get("upstream_repo")   or "").strip() or None
-            branch = (doc.get("upstream_branch") or "").strip() or "master"
+            branch = (doc.get("upstream_branch") or "").strip() or DEFAULT_UPSTREAM_BRANCH
             return repo, branch
 
     except Exception as exc:
         log_error(f"update.py: DB lookup failed ({exc}) — falling back to config.env.")
 
-    return None, "master"
+    return None, DEFAULT_UPSTREAM_BRANCH
 
 
 # ── Priority: DB value  >  config.env value ──────────────────────────────────
 db_repo, db_branch = _fetch_upstream_from_db()
 
-UPSTREAM_REPO   = db_repo   or environ.get("UPSTREAM_REPO",   "").strip() or None
-UPSTREAM_BRANCH = db_branch or environ.get("UPSTREAM_BRANCH", "").strip() or "master"
+UPSTREAM_REPO   = db_repo   or environ.get("UPSTREAM_REPO",   "").strip() or DEFAULT_UPSTREAM_REPO
+UPSTREAM_BRANCH = db_branch or environ.get("UPSTREAM_BRANCH", "").strip() or DEFAULT_UPSTREAM_BRANCH
 
 # ── Git update ────────────────────────────────────────────────────────────────
 if UPSTREAM_REPO:
@@ -70,8 +72,8 @@ if UPSTREAM_REPO:
 
     update_cmd = (
         f"git init -q && "
-        f"git config --global user.email 'doc.adhikari@gmail.com' && "
-        f"git config --global user.name 'weebzone' && "
+        f"git config --global user.email 'moviebox-bot@users.noreply.github.com' && "
+        f"git config --global user.name 'moviebox-bot' && "
         f"git add . && git commit -sm 'update' -q && "
         f"git remote add origin {UPSTREAM_REPO} && "
         f"git fetch origin -q && "

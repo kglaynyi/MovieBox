@@ -11,12 +11,14 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fastapi.responses import Response as PlainResponse
 from fastapi.responses import StreamingResponse
+import httpx
 
 from Backend import db
 from Backend.fastapi.security.tokens import verify_token
 from Backend.helper.analytics import client_ip_from, record_stream_start
 from Backend.helper.custom_dl import ACTIVE_STREAMS, RECENT_STREAMS, ByteStreamer
 from Backend.helper.encrypt import decode_string
+from Backend.helper.gdrive_source import is_safe_remote_url
 from Backend.helper.utils import track_usage
 from Backend.helper.virtual_dl import resolve_virtual_parts, virtual_stream_generator
 from Backend.helper.zip_stream import resolve_zip_entry
@@ -265,6 +267,15 @@ async def stream_handler(request: Request, token: str, id: str, name: str, token
             request.headers.get("user-agent", ""),
         ))
     decoded = await decode_string(id)
+    if decoded.get("source") == "gdrive":
+        return await gdrive_media_streamer(
+            request=request,
+            source_url=str(decoded.get("url") or ""),
+            source_name=str(decoded.get("name") or name or "video.mkv"),
+            token=token,
+            token_data=token_data,
+            stream_id_hash=id,
+        )
 
     if decoded.get("global"):
         if decoded.get("zip"):
@@ -301,6 +312,60 @@ async def stream_handler(request: Request, token: str, id: str, name: str, token
         request=request, chat_id=chat_id, msg_id=int(msg_id),
         token=token, token_data=token_data, stream_id_hash=id,
     )
+
+
+async def gdrive_media_streamer(
+    request: Request,
+    source_url: str,
+    source_name: str,
+    token: str,
+    token_data: dict | None = None,
+    stream_id_hash: str | None = None,
+):
+    if not source_url or not is_safe_remote_url(source_url):
+        raise HTTPException(status_code=400, detail="Invalid Google Drive source URL")
+
+    range_header = request.headers.get("Range", "")
+    upstream_headers = {"User-Agent": "MovieBox/1.0"}
+    if range_header:
+        upstream_headers["Range"] = range_header
+
+    async def _stream():
+        async with httpx.AsyncClient(timeout=90.0, follow_redirects=True) as client:
+            async with client.stream("GET", source_url, headers=upstream_headers) as resp:
+                if resp.status_code >= 400:
+                    raise HTTPException(status_code=404, detail="Remote source unavailable")
+                async for chunk in resp.aiter_bytes(chunk_size=256 * 1024):
+                    yield chunk
+
+    async with httpx.AsyncClient(timeout=45.0, follow_redirects=True) as probe_client:
+        probe_method = "HEAD" if request.method == "HEAD" else "GET"
+        probe_headers = dict(upstream_headers)
+        if request.method != "HEAD":
+            probe_headers["Range"] = probe_headers.get("Range", "bytes=0-0")
+        probe = await probe_client.request(probe_method, source_url, headers=probe_headers)
+        if probe.status_code == 405 and probe_method == "HEAD":
+            probe = await probe_client.get(source_url, headers={"Range": "bytes=0-0", "User-Agent": "MovieBox/1.0"})
+        if probe.status_code >= 400:
+            raise HTTPException(status_code=404, detail="Remote source unavailable")
+
+        file_name = source_name or unquote(request.path_params.get("name", "")) or "video.mkv"
+        mime_type = (probe.headers.get("content-type") or mimetypes.guess_type(file_name)[0] or "application/octet-stream")
+        headers = {
+            "Content-Type": mime_type,
+            "Content-Disposition": _content_disposition(file_name),
+            "Accept-Ranges": probe.headers.get("accept-ranges", "bytes"),
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Expose-Headers": "Content-Length, Content-Range, Accept-Ranges",
+            "Cache-Control": "public, max-age=1800",
+        }
+        for key in ("content-length", "content-range"):
+            if probe.headers.get(key):
+                headers[key.title()] = probe.headers.get(key)
+        status = 206 if headers.get("Content-Range") else 200
+        if request.method == "HEAD":
+            return PlainResponse(status_code=status, headers=headers)
+    return StreamingResponse(_stream(), status_code=status, headers=headers)
 
 
 #----- Stream a single Telegram file, with optional multi-client parallelism

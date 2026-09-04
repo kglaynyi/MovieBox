@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Tools — TG Stremio{% endblock %}
+{% block title %}Tools — NLYNN{% endblock %}
 
 {% block content %}
 
@@ -309,6 +309,50 @@
             </button>
         </div>
         <p class="hint mt-3" id="scan-error" style="color:#ef4444;display:none"></p>
+    </div>
+
+    <!-- ══ Google Drive Scanner ═════════════════════════════════════════ -->
+    <div class="tool-card">
+        <div class="flex items-center justify-between flex-wrap gap-2">
+            <h2 style="margin-bottom:0"><i class="fa-brands fa-google-drive"></i> Google Drive Scanner</h2>
+            <span id="gd-scan-status-pill" class="status-pill status-idle">Idle</span>
+        </div>
+
+        <p class="hint mt-3 mb-4">
+            Index video files from Google Drive folder/index configured in Settings.
+        </p>
+
+        <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
+            <div class="text-sm font-bold" id="gd-scan-current">No scan running</div>
+            <div class="text-sm" style="color:var(--text-sec)">
+                <i class="fa-regular fa-clock"></i> <span id="gd-scan-elapsed">0s</span>
+            </div>
+        </div>
+        <div class="progress-track mb-4">
+            <div class="progress-fill" id="gd-scan-bar"></div>
+        </div>
+
+        <div class="stat-grid mb-4">
+            <div class="stat-box"><div class="v" id="gd-processed">0</div><div class="l">Processed</div></div>
+            <div class="stat-box"><div class="v" style="color:#22c55e" id="gd-indexed">0</div><div class="l">Indexed</div></div>
+            <div class="stat-box"><div class="v" id="gd-dup">0</div><div class="l">Skipped (dup)</div></div>
+            <div class="stat-box"><div class="v" id="gd-meta">0</div><div class="l">Skipped (meta)</div></div>
+            <div class="stat-box"><div class="v" id="gd-nonvid">0</div><div class="l">Non-video</div></div>
+            <div class="stat-box"><div class="v" style="color:#ef4444" id="gd-errors">0</div><div class="l">Errors</div></div>
+        </div>
+
+        <div class="flex items-center gap-2 flex-wrap">
+            <button class="btn btn-primary" id="gd-scan-start-btn" onclick="startGDriveScan('scan')">
+                <i class="fa-solid fa-play"></i> Start Scan
+            </button>
+            <button class="btn btn-warning" id="gd-rescan-btn" onclick="confirmGDriveRescan()">
+                <i class="fa-solid fa-arrows-rotate"></i> Full Rescan
+            </button>
+            <button class="btn btn-danger" id="gd-scan-cancel-btn" onclick="cancelGDriveScan()" disabled>
+                <i class="fa-solid fa-stop"></i> Stop
+            </button>
+        </div>
+        <p class="hint mt-3" id="gd-scan-error" style="color:#ef4444;display:none"></p>
     </div>
 
     <!-- ══ Bot Admin Manager ════════════════════════════════════════════ -->
@@ -698,6 +742,7 @@ async function loadManualSession() {
 
 /* ─────────────── State ─────────────── */
 let scanTimer = null;
+let gdScanTimer = null;
 let dbcTimer = null;
 let dupTimer = null;
 let dupPurgeTimer = null;
@@ -839,6 +884,104 @@ function renderScan(s) {
             bar.classList.add('indeterminate');
             document.getElementById('scan-current').textContent =
                 `Scanning ${name}` + (s.current_id ? ` · up to msg #${s.current_id}` : '');
+        }
+
+        /* ─────────────── Google Drive scan control ─────────────── */
+        async function startGDriveScan(mode) {
+            try {
+                const res = await fetch('/api/admin/tools/gdrive-scan/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ mode })
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    showToast(data.message || 'Google Drive scan started.', 'success', 'Google Drive');
+                    startGDriveScanPolling();
+                } else {
+                    showToast(data.detail || 'Could not start Google Drive scan.', 'error', 'Error');
+                }
+            } catch (e) {
+                showToast('Network error.', 'error', 'Error');
+            }
+        }
+
+        function confirmGDriveRescan() {
+            if (!confirm('Full rescan will remove previously indexed Google Drive entries and re-index from source.\n\nProceed?')) return;
+            startGDriveScan('rescan');
+        }
+
+        async function cancelGDriveScan() {
+            try {
+                const res = await fetch('/api/admin/tools/gdrive-scan/cancel', { method: 'POST' });
+                const data = await res.json();
+                showToast(data.message || 'Stop requested.', data.ok ? 'info' : 'error', 'Google Drive');
+            } catch (e) {
+                showToast('Network error.', 'error', 'Error');
+            }
+        }
+
+        function startGDriveScanPolling() {
+            if (gdScanTimer) clearInterval(gdScanTimer);
+            pollGDriveScan();
+            gdScanTimer = setInterval(pollGDriveScan, 1500);
+        }
+
+        async function pollGDriveScan() {
+            try {
+                const res = await fetch('/api/admin/tools/gdrive-scan/status');
+                const data = await res.json();
+                renderGDriveScan(data.data || {});
+            } catch (e) { /* ignore */ }
+        }
+
+        function renderGDriveScan(s) {
+            const pill = document.getElementById('gd-scan-status-pill');
+            const status = s.status || 'idle';
+            pill.className = 'status-pill status-' + status;
+            pill.textContent = status.charAt(0).toUpperCase() + status.slice(1);
+
+            const c = s.counters || {};
+            setText('gd-processed', c.processed || 0);
+            setText('gd-indexed', c.indexed || 0);
+            setText('gd-dup', c.skipped_dup || 0);
+            setText('gd-meta', c.skipped_meta || 0);
+            setText('gd-nonvid', c.skipped_nonvid || 0);
+            setText('gd-errors', c.errors || 0);
+            setText('gd-scan-elapsed', s.elapsed || '0s');
+
+            const bar = document.getElementById('gd-scan-bar');
+            const startBtn = document.getElementById('gd-scan-start-btn');
+            const cancelBtn = document.getElementById('gd-scan-cancel-btn');
+            const rescanBtn = document.getElementById('gd-rescan-btn');
+            const errEl = document.getElementById('gd-scan-error');
+            const currentEl = document.getElementById('gd-scan-current');
+
+            if (s.is_running) {
+                if (s.has_progress && s.current_target_id) {
+                    bar.classList.remove('indeterminate');
+                    bar.style.width = (s.progress || 0) + '%';
+                    currentEl.textContent = `Scanning · ${s.current_id || 0}/${s.current_target_id || 0} (${s.progress || 0}%)`;
+                } else {
+                    bar.classList.add('indeterminate');
+                    currentEl.textContent = 'Scanning Google Drive source...';
+                }
+                startBtn.disabled = true; rescanBtn.disabled = true; cancelBtn.disabled = false;
+                errEl.style.display = 'none';
+            } else {
+                bar.classList.remove('indeterminate');
+                startBtn.disabled = false; rescanBtn.disabled = false; cancelBtn.disabled = true;
+                bar.style.width = status === 'completed' ? '100%' : '0%';
+                currentEl.textContent =
+                    status === 'completed' ? 'Scan complete.' :
+                    status === 'cancelled' ? 'Stopped.' :
+                    status === 'error' ? 'Scan failed.' : 'No scan running';
+                if (s.error) { errEl.style.display = ''; errEl.textContent = s.error; }
+                else errEl.style.display = 'none';
+                if (gdScanTimer && ['completed', 'cancelled', 'error', 'idle'].includes(status)) {
+                    clearInterval(gdScanTimer); gdScanTimer = null;
+                }
+            }
         }
         startBtn.disabled = true; rescanBtn.disabled = true; cancelBtn.disabled = false;
         errEl.style.display = 'none';
@@ -1443,6 +1586,10 @@ loadChannels();
 pollScan().then(() => {
     const pill = document.getElementById('scan-status-pill');
     if (pill.classList.contains('status-running')) startScanPolling();
+});
+pollGDriveScan().then(() => {
+    const pill = document.getElementById('gd-scan-status-pill');
+    if (pill.classList.contains('status-running')) startGDriveScanPolling();
 });
 pollDbc().then(() => {
     const pill = document.getElementById('dbc-status-pill');
