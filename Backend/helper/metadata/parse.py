@@ -85,6 +85,53 @@ def parse_media_name(name: str) -> dict:
     return parsed
 
 
+# Drive filenames use explicit Scene-style episode markers. Bare title numbers
+# are not evidence of an absolute anime episode.
+_SCENE_EPISODE = re.compile(r"(?i)(?<![a-z0-9])s(?P<season>\d{1,2})[ ._-]*e(?P<episode>\d{1,3})(?!\d)")
+_SCENE_YEAR = re.compile(r"(?<![a-zA-Z0-9])(?:19|20)\d{2}(?![a-zA-Z0-9])")
+_EXTRA_FOLDERS = {"extras", "featurettes", "behind the scenes", "deleted scenes", "trailers", "samples"}
+_EXTRA_SUFFIX = re.compile(r"(?i)(?:^|[ ._-]+)(?:featurette|deleted[ ._-]+scene|behind[ ._-]+the[ ._-]+scenes|trailer|sample)s?$ ".rstrip())
+
+
+def is_media_extra(filename: str, source_path: str = "") -> bool:
+    """Recognize explicit extras folders/suffixes, without title substring guesses."""
+    from urllib.parse import unquote, urlsplit
+    path = unquote(urlsplit(source_path).path)
+    parents = path.replace("\\", "/").split("/")[:-1]
+    if any(re.sub(r"[._-]+", " ", part).strip().lower() in _EXTRA_FOLDERS for part in parents):
+        return True
+    stem = re.sub(r"\.[a-z0-9]{2,4}$", "", filename, flags=re.I)
+    return bool(_EXTRA_SUFFIX.search(stem))
+
+
+def parse_scene_name(filename: str) -> dict:
+    parsed = parse_media_name(filename)
+    anchor = _SCENE_EPISODE.search(filename)
+    if anchor:
+        parsed["season"] = int(anchor["season"])
+        parsed["episode"] = int(anchor["episode"])
+        prefix = filename[:anchor.start()]
+    else:
+        # PTN also supports 1x01 and Season/Episode wording. Do not trust an
+        # unanchored number as a TV episode.
+        if not (_EXPLICIT_NXNN_RE.search(filename) or _EXPLICIT_SEASON_WORD_RE.search(filename)):
+            parsed["season"] = parsed["episode"] = None
+        prefix = filename
+    # Last year wins: Blade.Runner.2049.2017 retains 2049 in the title.
+    # Accept future years in the user's naming convention, unlike PTN's window.
+    years = [m for m in _SCENE_YEAR.finditer(prefix) if prefix[:m.start()].strip(" ._-([")]
+    if years:
+        year = years[-1]
+        parsed["year"] = int(year.group())
+        parsed["title"] = prefix[:year.start()].strip(" ._-([")
+    elif anchor:
+        parsed["title"] = prefix.strip(" ._-")
+    if parsed.get("title"):
+        parsed["title"] = re.sub(r"[._]+", " ", parsed["title"]).strip()
+    parsed["quality"] = parsed.get("quality") or "Unknown"
+    return parsed
+
+
 def apply_combined_override(payload: dict, combined: dict) -> None:
     season, start, end = combined["season"], combined["start"], combined["end"]
     payload["season_number"] = COMBINED_SEASON
