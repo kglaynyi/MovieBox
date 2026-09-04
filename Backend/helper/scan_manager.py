@@ -831,6 +831,7 @@ class GDriveScanManager:
                 "indexed": 0,
                 "skipped_dup": 0,
                 "skipped_meta": 0,
+                "skipped_extras": 0,
                 "skipped_nonvid": 0,
                 "subtitles_added": 0,
                 "subtitles_skipped": 0,
@@ -1010,6 +1011,12 @@ class GDriveScanManager:
                     s["counters"]["skipped_nonvid"] += 1
                     continue
 
+                from Backend.helper.metadata.parse import is_media_extra
+                if is_media_extra(name, str(f.get("path") or source_url)):
+                    s["counters"]["skipped_extras"] += 1
+                    LOGGER.info(f"[GDriveScan] Skipping extra: {name}")
+                    continue
+
                 try:
                     payload = {"source": "gdrive", "url": source_url, "name": name}
                     if f.get("kind") == "gdi_js":
@@ -1019,7 +1026,7 @@ class GDriveScanManager:
                         s["counters"]["skipped_dup"] += 1
                         continue
 
-                    metadata_info = await metadata(name, 0, 0)
+                    metadata_info = await metadata(name, 0, 0, scene_filename=True)
                     if not metadata_info:
                         s["counters"]["skipped_meta"] += 1
                         continue

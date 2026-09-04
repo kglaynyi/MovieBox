@@ -24,6 +24,7 @@ from Backend.helper.metadata.parse import (
     is_absolute_episode,
     is_multipart_video,
     parse_media_name,
+    parse_scene_name,
 )
 from Backend.helper.metadata.providers import cinemeta, tmdb
 from Backend.helper.metadata.resolvers import (
@@ -64,6 +65,7 @@ async def metadata(
     msg_id,
     override_id: str = None,
     season_hint: int = None,
+    *, scene_filename: bool = False,
 ) -> dict | None:
     if is_multipart_video(filename):
         LOGGER.info(f"Skipping {filename}: split video file not meant to be combined in Stremio")
@@ -74,7 +76,7 @@ async def metadata(
     parse_target = strip_part_suffix(filename) if split_info else filename
 
     try:
-        parsed = parse_media_name(parse_target)
+        parsed = parse_scene_name(parse_target) if scene_filename else parse_media_name(parse_target)
     except Exception as e:
         LOGGER.error(f"Parsing failed for {filename}: {e}\n{traceback.format_exc()}")
         return None
@@ -97,7 +99,7 @@ async def metadata(
 
     # GuessIt sometimes yields season=0 for absolute anime releases — treat as no season
     try:
-        if season is not None and int(season) == 0:
+        if not scene_filename and season is not None and int(season) == 0:
             season = None
     except (TypeError, ValueError):
         pass
@@ -114,13 +116,13 @@ async def metadata(
     # Absolute / orphan episode (e.g. "One Piece 1223 720.mkv",
     # "Naruto Shippuden - 016 480p ...", "[Judas] One Piece - 1172.mkv")
     absolute = False
-    if episode is None and not season:
+    if not scene_filename and episode is None and not season:
         abs_ep = extract_absolute_episode(filename, parsed)
         if abs_ep is not None:
             episode = abs_ep
             absolute = True
             parsed["episode"] = abs_ep
-    elif is_absolute_episode(parsed, filename):
+    elif not scene_filename and is_absolute_episode(parsed, filename):
         absolute = True
         if episode is None:
             episode = extract_absolute_episode(filename, parsed)
@@ -129,7 +131,8 @@ async def metadata(
     # PTN/GuessIt treated a numbered release as a movie (no season/episode).
     anime_channel_early = _is_anime_channel(channel)
     if (
-        anime_channel_early
+        not scene_filename
+        and anime_channel_early
         and not season
         and not absolute
         and episode is None
@@ -149,10 +152,8 @@ async def metadata(
 
     # Strip absolute episode / release-group noise from the search title so
     # "One Piece - 1172" does not match "One Piece Egghead Arc Recap".
-    if absolute and episode is not None:
-        title = clean_anime_search_title(title, int(episode))
-    else:
-        title = clean_anime_search_title(title, None)
+    if not scene_filename and _is_anime_channel(channel):
+        title = clean_anime_search_title(title, int(episode) if absolute and episode is not None else None)
 
     default_id = _resolve_default_id(override_id, filename)
 
@@ -174,7 +175,7 @@ async def metadata(
 
     try:
         # TV path: classic SxxExx, or absolute/orphan episode on anime channels
-        is_tv = bool(season and episode) or (absolute and episode and anime_channel)
+        is_tv = (season is not None and episode is not None if scene_filename else bool(season and episode)) or (absolute and episode and anime_channel)
         if is_tv:
             if absolute:
                 LOGGER.info(f"Fetching TV metadata (absolute): {title} E{int(episode)} (year={year})")

@@ -137,7 +137,7 @@
         const pill = el('gd-scan-status-pill');
         pill.className = 'status-pill status-' + status; pill.textContent = status;
         const counters = s.counters || {};
-        for (const [id, key] of Object.entries({'gd-processed':'processed', 'gd-indexed':'indexed', 'gd-dup':'skipped_dup', 'gd-meta':'skipped_meta', 'gd-nonvid':'skipped_nonvid', 'gd-errors':'errors'})) text(id, counters[key] || 0);
+        for (const [id, key] of Object.entries({'gd-processed':'processed', 'gd-indexed':'indexed', 'gd-dup':'skipped_dup', 'gd-meta':'skipped_meta', 'gd-extras':'skipped_extras', 'gd-nonvid':'skipped_nonvid', 'gd-errors':'errors'})) text(id, counters[key] || 0);
         text('gd-scan-elapsed', s.elapsed || '0s');
         const bar = el('gd-scan-bar');
         el('gd-scan-start-btn').disabled = starting || !!s.is_running;

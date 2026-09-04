@@ -130,3 +130,31 @@ point to an installed Chromium. All application HTTP responses are local/mocked.
 This browser test was **not run successfully in the preparation environment**:
 Chromium was absent and its download timed out. Visual/mobile layout and live
 deployment validation are still required; DOM-model tests do not replace them.
+
+## Movie and TV filename recognition
+
+Drive scans accept Scene-style filenames, including dots or spaces:
+
+| File | Recognized as |
+| --- | --- |
+| `Movie.Name.2021.2160p.WEB-DL.mkv` | Movie Name, release year 2021, 2160p |
+| `Movie Name (2021).mkv` | Movie Name, release year 2021, Unknown quality |
+| `Blade.Runner.2049.2017.2160p.mkv` | Blade Runner 2049, release year 2017 |
+| `Show Name S01 E01.mkv` | TV show, season 1 episode 1, Unknown quality |
+| `Show.Name.S01.E01.2160p.WEB-DL.mkv` | TV show, season 1 episode 1, 2160p |
+
+The filename must still have a supported video extension such as `.mkv` or `.mp4`.
+Resolution is optional for Drive scanning; Unknown is a label, not an inferred
+resolution. Use the actual release year after the full movie title. Bare numbers
+in movie titles are preserved, not treated as anime episode numbers. TV naming
+uses explicit season/episode markers; a folder called TV does not convert an
+unnumbered movie filename into an episode. Recursive subfolder scanning is unchanged.
+
+Files explicitly marked as featurettes, trailers, samples or deleted scenes,
+and files inside extras folders, are counted under **Skipped (extras)** instead
+of being searched as independent movies. **Skipped (meta)** means no usable
+metadata match was returned; check the filename and provider configuration.
+Filename parsing does not guarantee that a title exists in TMDB/TVDB/Cinemeta.
+
+After upgrading from the previous recognizer, use **Full Rescan** to refresh the
+selected folders. Existing media is preserved. Files themselves are not renamed.
