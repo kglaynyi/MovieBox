@@ -62,6 +62,7 @@ pinned: false
   * [🐳 VPS (recommended)](#-vps-guide-recommended)
   * [🤗 Hugging Face](#-hugging-face-guide-free-always-online-no-vps)
 * [📺 Watch in Nuvio / Stremio](#-watch-in-nuvio--stremio)
+* [🔭 Suggested Future Improvements](#-suggested-future-improvements)
 * [🏅 Contributors](#-contributors)
 
 ---
@@ -880,6 +881,19 @@ Your server is a standard **Stremio-style addon**, so it works in any compatible
 4. Done! 🎉 Your Telegram library appears in the catalog and streams directly.
 
 > 💡 Prefer **Stremio**? It works too — just install the same manifest URL.
+
+---
+
+## 🔭 Suggested Future Improvements
+
+If you want to keep improving this project over time, these are high-impact next steps:
+
+1. **Add CI quality gates**: run lint/check/tests on every PR before deploy.
+2. **Harden defaults**: force admin password change on first login and tighten default CORS.
+3. **Split large FastAPI modules**: break `Backend/fastapi/main.py` into smaller routers/services for easier maintenance.
+4. **Document architecture & config matrix**: clearly separate required vs optional settings (especially multi-DB and multi-bot setups).
+5. **Improve observability**: add structured logs + simple metrics/health dashboard for stream and DB performance.
+6. **Backup & restore guide**: provide an official Mongo backup/restore + disaster-recovery walkthrough for operators.
 
 ---
 
