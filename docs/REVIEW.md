@@ -84,3 +84,26 @@ HTTPX documents the IP-pinning/TLS mechanism at
 https://www.python-httpx.org/advanced/extensions/#sni_hostname.
 Heroku package-manager guidance is at
 https://devcenter.heroku.com/articles/python-support.
+
+## GDI-JS finalization review — 2026-09-04
+
+The open GDI-JS implementation from PR #4 (`e94f912`) was used as the base for
+this follow-up. Its existing protocol fixtures and credential restrictions were
+retained. Fixed the three review findings (WebDAV source-kind propagation, early
+folder-navigation clicks, and backup import across index origins), and added
+MongoDB page checkpoints with bounded page-by-page indexing and explicit retry.
+See `docs/GDI_JS_SETUP.md` for current source setup and scan semantics; the older
+HTML-only/cursor limitations above describe the previous master snapshot.
+
+Validation: **70 offline Python tests pass on Python 3.12**, dependency-free
+JavaScript control tests pass (including delayed configuration/early navigation),
+undefined-name lint passes, Python/template and JavaScript syntax checks pass,
+and shell/whitespace checks pass. The new CI workflow targets both Python 3.11
+(the deployment version) and 3.12; local validation alone does not establish the
+Python 3.11 CI result.
+
+Real-browser QA remains unavailable: Chromium is absent and its download failed
+with HTTP 502/timeouts. No production Heroku, MongoDB, Telegram or live indexed
+media playback was exercised. Review the CI result and deploy the exact updated
+PR commit, then test one small selected folder, seek/HEAD, WebDAV and restart/resume.
+No production settings or data were changed by this review.

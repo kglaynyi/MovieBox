@@ -29,6 +29,7 @@ from Backend.helper.custom_dl import ByteStreamer, _speed_test_single_client, ru
 from Backend.helper.encrypt import decode_string, encode_string
 from Backend.helper.health import run_health_checks
 from Backend.helper.gdrive_source import is_safe_remote_url
+from Backend.helper.gdi_js import GDIError, GDIClient, config_from_settings, validate_settings_update
 from Backend.helper.manual_add import resolve_telegram_message, stamp_caption_by_ref
 from Backend.helper.requests_manager import (
     delete_request,
@@ -1733,6 +1734,8 @@ async def get_settings_api() -> dict:
     data["admin_password"] = ""
     data["session_secret_set"] = bool(data.get("session_secret"))
     data["session_secret"] = ""
+    data["gdrive_index_password_set"] = bool(data.get("gdrive_index_password"))
+    data["gdrive_index_password"] = ""
 
     try:
         data["database_list"] = db.get_database_list()
@@ -1761,6 +1764,18 @@ async def get_settings_api() -> dict:
 
 
 async def update_settings_api(payload: dict) -> dict:
+
+    current = SettingsManager.current().to_dict()
+    try:
+        validate_settings_update(current, payload)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc) if isinstance(exc, GDIError) else "Invalid GDI-JS settings.") from None
+    gdi_keys = {"gdrive_source_type", "gdrive_index_url", "gdrive_index_username",
+                "gdrive_index_password", "gdrive_selected_folders", "gdrive_include_filters", "gdrive_exclude_filters"}
+    if gdrive_scan_manager.get_status()["is_running"] and any(
+        key in payload and payload[key] != current.get(key) for key in gdi_keys
+    ):
+        raise HTTPException(409, "Stop the current Drive scan before changing its source or folders.")
 
     #----- Empty password string means leave it unchanged
     if "admin_password" in payload and not str(payload["admin_password"]).strip():
@@ -2270,6 +2285,16 @@ async def start_gdrive_scan_api(payload: dict | None = None) -> dict:
     mode = str(payload.get("mode", "scan")).lower()
     if mode not in ("scan", "rescan"):
         raise HTTPException(status_code=400, detail="mode must be 'scan' or 'rescan'.")
+    settings = SettingsManager.current()
+    if settings.gdrive_source_type == "gdi_js":
+        try:
+            selected = config_from_settings(settings).selections(settings.gdrive_selected_folders)
+            if not selected:
+                raise GDIError("Browse the index and save at least one folder before scanning.")
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from None
+    elif not settings.gdrive_index_url and not settings.gdrive_folder_url:
+        raise HTTPException(400, "Save a Drive source URL in Settings first.")
     result = await gdrive_scan_manager.start(mode=mode)
     if not result.get("ok"):
         raise HTTPException(status_code=409, detail=result.get("message", "Could not start Google Drive scan."))
@@ -2282,7 +2307,41 @@ async def cancel_gdrive_scan_api() -> dict:
 
 
 async def gdrive_scan_status_api() -> dict:
+    await gdrive_scan_manager.restore_checkpoint()
     return {"status": "success", "data": gdrive_scan_manager.get_status()}
+
+
+async def gdrive_folder_config_api() -> dict:
+    settings = SettingsManager.current()
+    try:
+        config = config_from_settings(settings) if settings.gdrive_source_type == "gdi_js" else None
+    except ValueError:
+        raise HTTPException(400, "Save a valid GDI-JS index URL in Settings first.") from None
+    return {"source_type": settings.gdrive_source_type,
+            "root_path": config.root_path if config else "",
+            "selected_folders": settings.gdrive_selected_folders}
+
+
+async def gdrive_folders_api(payload: dict) -> dict:
+    settings = SettingsManager.current()
+    if settings.gdrive_source_type != "gdi_js":
+        raise HTTPException(400, "Select GDI-JS in Settings → Google Drive source, then save.")
+    try:
+        config = config_from_settings(settings)
+        async with GDIClient(config) as client:
+            page = await client.list_page(payload.get("path") or config.root_path,
+                                          payload.get("page_token"), payload.get("page_index", 0))
+        return {"path": page["path"], "folders": [i for i in page["items"] if i["is_folder"]],
+                "next_page_token": page["next_page_token"], "page_index": page["page_index"]}
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+async def gdrive_folder_selection_api(payload: dict) -> dict:
+    if SettingsManager.current().gdrive_source_type != "gdi_js":
+        raise HTTPException(400, "Folder selection requires GDI-JS source type.")
+    await update_settings_api({"gdrive_selected_folders": payload.get("folders")})
+    return {"selected_folders": SettingsManager.current().gdrive_selected_folders}
 
 
 async def start_dbcheck_api() -> dict:

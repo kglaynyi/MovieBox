@@ -45,7 +45,7 @@ class RemoteStreamingResponse(StreamingResponse):
             await self.close()
 
 
-async def remote_media_response(request, url, name, on_chunk=None, on_close=None):
+async def remote_media_response(request, url, name, on_chunk=None, on_close=None, *, opener=None):
     if not public_url(url):
         raise HTTPException(400, "Invalid or non-public source URL")
     client = httpx.AsyncClient(timeout=httpx.Timeout(90, connect=15), trust_env=False)
@@ -57,12 +57,13 @@ async def remote_media_response(request, url, name, on_chunk=None, on_close=None
             if request.headers.get(key):
                 headers[key] = request.headers[key]
         method = "HEAD" if request.method == "HEAD" else "GET"
-        upstream = await open_remote(client, method, url, headers)
+        open_source = opener or open_remote
+        upstream = await open_source(client, method, url, headers)
         if method == "HEAD" and upstream.status_code == 405:
             await upstream.aclose()
             # Open a GET but never consume its body; avoid a one-byte probe whose
             # length would misrepresent the full resource in a HEAD response.
-            upstream = await open_remote(client, "GET", url, headers)
+            upstream = await open_source(client, "GET", url, headers)
         if upstream.status_code == 416:
             out = {"Cache-Control": "private, no-store"}
             if upstream.headers.get("content-range"):

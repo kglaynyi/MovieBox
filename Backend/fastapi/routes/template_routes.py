@@ -265,6 +265,8 @@ async def tools_page(request: Request, _: bool = Depends(require_auth)):
 async def settings_page(request: Request, _: bool = Depends(require_auth)):
     settings = SettingsManager.current().to_dict()
     settings["admin_password"] = ""
+    settings["gdrive_index_password_set"] = bool(settings.get("gdrive_index_password"))
+    settings["gdrive_index_password"] = ""
     try:
         settings["database_list"] = db.get_database_list()
     except Exception:

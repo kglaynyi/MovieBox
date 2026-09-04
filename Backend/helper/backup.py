@@ -1,4 +1,5 @@
 import re
+from urllib.parse import urlsplit
 from datetime import datetime
 
 from bson import ObjectId
@@ -9,7 +10,7 @@ from Backend.logger import LOGGER
 
 #----- Never export/restore credentials; everything else (incl. extra DBs and
 #----- bot tokens) is included so a backup can fully migrate a deployment.
-_SETTINGS_EXCLUDE = {"admin_password", "session_secret"}
+_SETTINGS_EXCLUDE = {"admin_password", "session_secret", "gdrive_index_password"}
 
 #----- backup section -> tracking collection
 _COLLECTIONS = {
@@ -80,6 +81,17 @@ async def import_config(payload: dict) -> dict:
     if isinstance(settings, dict):
         clean = {k: v for k, v in settings.items() if k not in _SETTINGS_EXCLUDE and k != "_id"}
         if clean:
+            from Backend.helper.gdi_js import validate_settings_update
+            current = SettingsManager.current().to_dict()
+            old = urlsplit(current.get("gdrive_index_url") or "")
+            new = urlsplit(clean.get("gdrive_index_url", current.get("gdrive_index_url")) or "")
+            if (old.scheme, old.netloc.lower()) != (new.scheme, new.netloc.lower()):
+                # Backups exclude the password. Never carry credentials to a new origin.
+                clean["gdrive_clear_password"] = True
+            from Backend.helper.scan_manager import gdrive_scan_manager
+            if gdrive_scan_manager.get_status()["is_running"]:
+                raise ValueError("Stop the Drive scan before restoring configuration.")
+            validate_settings_update(current, clean)
             reinit = await SettingsManager.update(db, clean)
             result["settings"] = f"{len(clean)} keys applied"
             if reinit:

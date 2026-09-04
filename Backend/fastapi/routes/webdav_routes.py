@@ -183,6 +183,7 @@ async def _stream_video(request: Request, node: VNode, token: str, token_data: d
             token=token,
             token_data=token_data,
             stream_id_hash=sid,
+            source_kind=str(decoded.get("kind") or "html"),
         )
 
     if decoded.get("global"):

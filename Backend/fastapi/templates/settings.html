@@ -1040,6 +1040,14 @@ document.addEventListener('DOMContentLoaded', sessLoadStatus);
             Configure Google Drive folder or Drive index URL for the Tools scanner.
         </p>
         <div style="margin-bottom:1rem">
+            <label class="s-label" for="gdrive_source_type">Source type</label>
+            <select id="gdrive_source_type" class="s-input">
+                <option value="html" {% if settings.gdrive_source_type != 'gdi_js' %}selected{% endif %}>HTML index / public Google Drive folder (legacy)</option>
+                <option value="gdi_js" {% if settings.gdrive_source_type == 'gdi_js' %}selected{% endif %}>GDI-JS index (login + folder selection)</option>
+            </select>
+            <p class="hint mt-2">For GDI-JS, save an index URL ending in /0:/ (or another configured drive). Then open Tools to choose folders. The public Google Drive Folder URL below is ignored in GDI-JS mode.</p>
+        </div>
+        <div style="margin-bottom:1rem">
             <label class="s-label" for="gdrive_folder_url">Google Drive Folder URL (optional)</label>
             <input type="url" id="gdrive_folder_url" class="s-input"
                 value="{{ settings.gdrive_folder_url | default('', true) }}"
@@ -1051,6 +1059,21 @@ document.addEventListener('DOMContentLoaded', sessLoadStatus);
                 value="{{ settings.gdrive_index_url | default('', true) }}"
                 placeholder="https://your-index.example.com/">
         </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4" style="margin-bottom:1rem">
+            <div>
+                <label class="s-label" for="gdrive_index_username">GDI-JS login username</label>
+                <input id="gdrive_index_username" class="s-input" autocomplete="off" value="{{ settings.gdrive_index_username | default('', true) }}">
+            </div>
+            <div>
+                <label class="s-label" for="gdrive_index_password">GDI-JS login password</label>
+                <input type="password" id="gdrive_index_password" class="s-input" autocomplete="new-password" value="" placeholder="Blank keeps the saved password">
+                <span id="gdi-password-state" class="hint">{{ 'Password saved' if settings.gdrive_index_password_set else 'No password saved' }}</span>
+            </div>
+        </div>
+        <label class="hint" style="display:block;margin-bottom:1rem">
+            <input type="checkbox" id="gdrive_clear_password"> Clear saved index password
+        </label>
+        <p class="hint" style="margin-bottom:1rem">Use the index account, not your Google or MovieBox login. Credentials stay on the server and are not included in addon links. Changing the index host requires re-entering or clearing its password.</p>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4" style="margin-bottom:1rem">
             <div>
                 <label class="s-label" for="gdrive_include_filters">Include filters (optional)</label>
@@ -1535,6 +1558,10 @@ async function saveSettings() {
         webdav_password:               document.getElementById('webdav_password').value,
         gdrive_folder_url:             (document.getElementById('gdrive_folder_url') || {}).value?.trim() || '',
         gdrive_index_url:              (document.getElementById('gdrive_index_url') || {}).value?.trim() || '',
+        gdrive_source_type:            document.getElementById('gdrive_source_type').value,
+        gdrive_index_username:         document.getElementById('gdrive_index_username').value.trim(),
+        gdrive_index_password:         document.getElementById('gdrive_index_password').value,
+        gdrive_clear_password:         document.getElementById('gdrive_clear_password').checked,
         gdrive_include_filters:        ((document.getElementById('gdrive_include_filters') || {}).value || '').split('\n').map(v => v.trim()).filter(Boolean),
         gdrive_exclude_filters:        ((document.getElementById('gdrive_exclude_filters') || {}).value || '').split('\n').map(v => v.trim()).filter(Boolean),
         gdrive_scan_mode:              (document.getElementById('gdrive_scan_mode') || {}).value || 'new_only',
@@ -1686,6 +1713,11 @@ function renderSettings(s) {
     if (gfu) gfu.value = s.gdrive_folder_url || '';
     const giu = document.getElementById('gdrive_index_url');
     if (giu) giu.value = s.gdrive_index_url || '';
+    document.getElementById('gdrive_source_type').value = s.gdrive_source_type || 'html';
+    document.getElementById('gdrive_index_username').value = s.gdrive_index_username || '';
+    document.getElementById('gdrive_index_password').value = '';
+    document.getElementById('gdrive_clear_password').checked = false;
+    document.getElementById('gdi-password-state').textContent = s.gdrive_index_password_set ? 'Password saved' : 'No password saved';
     const gif = document.getElementById('gdrive_include_filters');
     if (gif) gif.value = (s.gdrive_include_filters || []).join('\n');
     const gef = document.getElementById('gdrive_exclude_filters');

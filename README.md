@@ -128,7 +128,7 @@ The app is great for personal, single-user use, but it's intentionally lighter t
 - 🧩 **Split-file & multi-part playback** as one stream (incl. `.zip.001` split archives)
 - 🌀 **Anime-aware** metadata for anime channels
 - 🔍 **Global Search** across extra channels (now streams split & `.zip` archives too)
-- ☁️ **Google Drive source scanner** (folder/index based) with metadata indexing into the same library
+- ☁️ **GDI-JS source scanner** with authenticated multi-folder selection, saved scan progress, and metadata indexing into the same library
 - 🔐 **In-app Telegram login** — connect your user session from the Settings page (phone → code → 2FA), no manual session string needed
 - 🎚️ **Per-user addon settings** — each token can pick quality sort order, filter qualities, and hide/reorder catalogs
 - 📊 **User activity dashboard** — see who's online, what's now-playing, plus location, ISP, device/app & VPN
@@ -704,7 +704,7 @@ Set **one** channel where files that fail to index are copied, each with a note 
 Set an **HTTP Proxy URL** for outbound metadata/API requests, and optionally **show both** proxied and direct stream links.
 
 ### ☁️ Google Drive Source (optional)
-Set a public **Google Drive folder URL** and/or **Google Drive index URL**, plus optional include/exclude filters. Then run **Tools → Google Drive Scanner** to index videos into the same movie/series catalog used by Telegram channels.
+For a GDI-JS index, select **GDI-JS** in **Settings → Google Drive Source**, save its HTTPS URL and index account, then use **Tools → Google Drive Scanner → Connect / Browse** to select folders. Save the selection and start scanning. Interrupted GDI-JS scans resume from a saved page; playback resolves fresh signed links. See [GDI-JS setup and deployment](docs/GDI_JS_SETUP.md) for the full guide and verification limits. Legacy public-folder/HTML scanning remains available for existing installations.
 
 ### 🗄️ Extra Storage Databases
 Your first two databases (from `config.env`) are **locked** as *Tracking* and *Storage 1*. Add more MongoDB URIs here to expand capacity — 🟢 means connected. Remove entries only from the **end** of the list, since existing media reference databases by position.
