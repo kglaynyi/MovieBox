@@ -501,8 +501,10 @@ Everything here is on the **Settings** page (`/admin/settings`) — no terminal 
 - The panel goes offline for a few seconds and **reconnects automatically** when it's back.
 
 ### 🆙 Update to the latest code
-- The **same Restart button also updates**: it pulls the newest code from the **Upstream Repo / Branch** you set in Settings, then restarts.
-- Default upstream is this repository: `https://github.com/kglaynyi/MovieBox` on `main`. Change it in Settings only if you intentionally want a different source.
+- Restart only restarts the deployed version. Runtime Git updates and legacy upstream settings are disabled.
+- To update, review and merge changes into `master`, then deploy through your hosting provider. Existing deployment workflows remain unchanged.
+- Dependencies come from `pyproject.toml` and `uv.lock`. Do not add a root `requirements.txt`: Heroku requires a single package-manager choice.
+- For a local setup, run `uv sync --locked --no-dev`, then `bash start.sh`. Docker and Heroku install dependencies during the build.
 
 ### ⚙️ Everything else
 All other options — TMDB key, Base URL, channels, subscriptions, proxy, extra databases, multi-token bots, replace mode, hide catalog, etc. — live on the **Settings** page and apply **instantly, without a restart**. That includes the **Telegram user session** for Global Search (**Settings → Telegram User Session**).

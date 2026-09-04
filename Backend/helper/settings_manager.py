@@ -17,8 +17,6 @@ _DEFAULTS: Dict[str, Any] = {
     "tmdb_api": "",
     "tvdb_api": "",
     "base_url": "",
-    "upstream_repo": "https://github.com/kglaynyi/MovieBox",
-    "upstream_branch": "main",
     "admin_username": "admin",
     "admin_password": "admin",
     "session_secret": "",
@@ -71,8 +69,6 @@ def _seed_from_env() -> Dict[str, Any]:
         "tmdb_api":                     Telegram.TMDB_API,
         "tvdb_api":                     getattr(Telegram, "TVDB_API", "") or "",
         "base_url":                     Telegram.BASE_URL,
-        "upstream_repo":                (Telegram.UPSTREAM_REPO or _DEFAULTS["upstream_repo"]),
-        "upstream_branch":              (Telegram.UPSTREAM_BRANCH or _DEFAULTS["upstream_branch"]),
         "admin_username":               Telegram.ADMIN_USERNAME,
         "admin_password":               hash_password(Telegram.ADMIN_PASSWORD),
         "session_secret":               secrets.token_hex(32),
@@ -94,7 +90,7 @@ class Settings:
 
     def __init__(self, data: Dict[str, Any]) -> None:
         merged = dict(_DEFAULTS)
-        merged.update({k: v for k, v in data.items() if k != "_id"})
+        merged.update({k: v for k, v in data.items() if k not in {"_id", "upstream_repo", "upstream_branch"}})
         self._d = merged
 
     #----- Booleans
@@ -173,14 +169,6 @@ class Settings:
     @property
     def base_url(self) -> str:
         return str(self._d.get("base_url") or "").rstrip("/")
-
-    @property
-    def upstream_repo(self) -> str:
-        return str(self._d.get("upstream_repo") or "")
-
-    @property
-    def upstream_branch(self) -> str:
-        return str(self._d.get("upstream_branch") or "")
 
     @property
     def admin_username(self) -> str:
@@ -395,7 +383,7 @@ class SettingsManager:
     async def update(cls, db, new_values: Dict[str, Any]) -> Dict[str, str]:
         old = cls.current().to_dict()
         merged = dict(old)
-        merged.update(new_values)
+        merged.update({k: v for k, v in new_values.items() if k not in {"_id", "upstream_repo", "upstream_branch"}})
 
         results: Dict[str, str] = {}
 

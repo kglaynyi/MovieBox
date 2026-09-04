@@ -84,7 +84,7 @@ async def initialize_clients() -> None:
     tasks = [create_task(start_client(i, token)) for i, token in all_tokens.items()]
     results = await gather(*tasks)
 
-    started = {client_id: client for client_id, client in results if client}
+    started = dict(result for result in results if result is not None)
     multi_clients.update(started)
     for client_id, token in all_tokens.items():
         if client_id in started:
@@ -108,11 +108,12 @@ async def reload_multi_token_clients() -> dict:
         await stop_client(cid)
 
     to_start = {cid: tok for cid, tok in new_tokens.items() if cid not in old_ids or client_tokens.get(cid) != tok}
+    started = {}
 
     if to_start:
         tasks = [create_task(start_client(cid, tok)) for cid, tok in to_start.items()]
         results = await gather(*tasks)
-        started = {cid: client for cid, client in results if client}
+        started = dict(result for result in results if result is not None)
         multi_clients.update(started)
         for cid, tok in to_start.items():
             if cid in started:
@@ -120,10 +121,10 @@ async def reload_multi_token_clients() -> dict:
 
     LOGGER.info(
         f"Multi-token reload complete — {len(to_stop)} stopped, "
-        f"{len(to_start)} (re)started, {len(multi_clients)} total clients active."
+        f"{len(started)} (re)started, {len(multi_clients)} total clients active."
     )
     return {
         "stopped": len(to_stop),
-        "started": len(to_start),
+        "started": len(started),
         "total_clients": len(multi_clients),
     }

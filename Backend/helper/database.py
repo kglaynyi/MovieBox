@@ -46,7 +46,7 @@ class Database:
     async def connect(self):
         try:
             for index, uri in enumerate(self.db_uris):
-                client = motor.motor_asyncio.AsyncIOMotorClient(uri)
+                client = motor.motor_asyncio.AsyncIOMotorClient(uri, serverSelectionTimeoutMS=10000, connectTimeoutMS=10000)
                 db_key = "tracking" if index == 0 else f"storage_{index}"
                 self.clients[db_key] = client
                 self.dbs[db_key] = client[self.db_name]
@@ -70,6 +70,7 @@ class Database:
 
         except Exception as e:
             LOGGER.error(f"Database connection error: {e}")
+            raise
 
     #----- Create the indexes catalog/stream lookups rely on.
     #----- create_index is idempotent, so this is safe to call repeatedly.
@@ -1429,6 +1430,15 @@ class Database:
     ) -> List[dict]:
         target_quality = quality_to_update.get("quality")
         target_source = str(quality_to_update.get("source") or "telegram").strip().lower()
+        if target_source == "gdrive":
+            # Rescans refresh this exact source, never all files at the same resolution.
+            # Telegram replace/duplicate policies must not discard other Drive files.
+            source_url = quality_to_update.get("source_url")
+            stream_id = quality_to_update.get("id")
+            return [q for q in existing_qualities if not (
+                (stream_id and q.get("id") == stream_id) or
+                (source_url and q.get("source") == "gdrive" and q.get("source_url") == source_url)
+            )] + [quality_to_update]
         incoming_group_key = quality_to_update.get("group_key")
         replace_mode = SettingsManager.current().replace_mode
 
@@ -1999,6 +2009,8 @@ class Database:
 
     #----- Queue deletion of the Telegram message(s) backing a quality (split or single)
     async def _queue_quality_deletion(self, quality: dict) -> None:
+        if quality.get("source") == "gdrive":
+            return  # External sources have no Telegram message to delete.
         parts = quality.get("parts")
         if parts:
             for part in parts:
