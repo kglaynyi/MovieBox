@@ -307,12 +307,18 @@ def format_released_date(media):
 
 
 #----- Build a Stremio stream display name/title from a filename
-def format_stream_details(filename: str, quality: str, size: str, is_split: bool = False) -> tuple[str, str]:
+def format_stream_details(
+    filename: str,
+    quality: str,
+    size: str,
+    is_split: bool = False,
+    source_label: str = "Telegram",
+) -> tuple[str, str]:
     size_emoji = "📦" if is_split else "💾"
     try:
         parsed = PTN.parse(filename)
     except Exception:
-        return (f"Telegram {quality}", f"📁 {filename}\n{size_emoji} {size}")
+        return (f"{source_label} {quality}", f"📁 {filename}\n{size_emoji} {size}")
 
     codec_parts = []
     if parsed.get("codec"):
@@ -328,7 +334,7 @@ def format_stream_details(filename: str, quality: str, size: str, is_split: bool
 
     resolution = parsed.get("resolution", quality)
     quality_type = parsed.get("quality", "")
-    stream_name = f"Telegram {resolution} {quality_type}".strip()
+    stream_name = f"{source_label} {resolution} {quality_type}".strip()
 
     stream_title_parts = [
         f"📁 {filename}",
@@ -1032,6 +1038,8 @@ async def get_streams(
                 filename = quality.get("name", "")
                 quality_str = quality.get("quality", "HD")
                 size = quality.get("size", "")
+                source = str(quality.get("source") or "telegram").strip().lower()
+                source_label = "Google Drive" if source == "gdrive" else "Telegram"
                 size_bytes = parse_size_to_bytes(size)
 
                 combined = parse_combined_episodes(filename) if is_combined else None
@@ -1039,7 +1047,11 @@ async def get_streams(
                 name_key = combined_name_key(filename) if combined else ""
 
                 stream_name, stream_title = format_stream_details(
-                    filename, quality_str, size, is_split=bool(quality.get("group_key"))
+                    filename,
+                    quality_str,
+                    size,
+                    is_split=bool(quality.get("group_key")),
+                    source_label=source_label,
                 )
 
                 if combined:

@@ -1048,6 +1048,43 @@ document.addEventListener('DOMContentLoaded', sessLoadStatus);
         </p>
     </div>
 
+    <!-- ── Google Drive Source ──────────────────────────────────────────── -->
+    <div class="settings-card">
+        <h2><i class="fa-brands fa-google-drive"></i> Google Drive Source</h2>
+        <p style="font-size:0.82rem;color:var(--text-sec);margin-bottom:1rem">
+            Configure Google Drive folder or Drive index URL for the Tools scanner.
+        </p>
+        <div style="margin-bottom:1rem">
+            <label class="s-label" for="gdrive_folder_url">Google Drive Folder URL (optional)</label>
+            <input type="url" id="gdrive_folder_url" class="s-input"
+                value="{{ settings.gdrive_folder_url | default('', true) }}"
+                placeholder="https://drive.google.com/drive/folders/...">
+        </div>
+        <div style="margin-bottom:1rem">
+            <label class="s-label" for="gdrive_index_url">Google Drive Index URL (optional)</label>
+            <input type="url" id="gdrive_index_url" class="s-input"
+                value="{{ settings.gdrive_index_url | default('', true) }}"
+                placeholder="https://your-index.example.com/">
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4" style="margin-bottom:1rem">
+            <div>
+                <label class="s-label" for="gdrive_include_filters">Include filters (optional)</label>
+                <textarea id="gdrive_include_filters" class="s-input" rows="4" placeholder="one token per line">{{ (settings.gdrive_include_filters or []) | join('\n') }}</textarea>
+            </div>
+            <div>
+                <label class="s-label" for="gdrive_exclude_filters">Exclude filters (optional)</label>
+                <textarea id="gdrive_exclude_filters" class="s-input" rows="4" placeholder="one token per line">{{ (settings.gdrive_exclude_filters or []) | join('\n') }}</textarea>
+            </div>
+        </div>
+        <div>
+            <label class="s-label" for="gdrive_scan_mode">Default scan mode</label>
+            <select id="gdrive_scan_mode" class="s-input">
+                <option value="new_only" {% if (settings.gdrive_scan_mode or 'new_only') == 'new_only' %}selected{% endif %}>New files only</option>
+                <option value="full_rescan" {% if settings.gdrive_scan_mode == 'full_rescan' %}selected{% endif %}>Full rescan</option>
+            </select>
+        </div>
+    </div>
+
 <!-- ── Databases ────────────────────────────────────────────────────── -->
     <div class="settings-card">
         <h2><i class="fa-solid fa-database"></i> Databases</h2>
@@ -1513,6 +1550,11 @@ async function saveSettings() {
         mediaflow_password:            document.getElementById('mediaflow_password').value,
         webdav_user:                   document.getElementById('webdav_user').value.trim(),
         webdav_password:               document.getElementById('webdav_password').value,
+        gdrive_folder_url:             (document.getElementById('gdrive_folder_url') || {}).value?.trim() || '',
+        gdrive_index_url:              (document.getElementById('gdrive_index_url') || {}).value?.trim() || '',
+        gdrive_include_filters:        ((document.getElementById('gdrive_include_filters') || {}).value || '').split('\n').map(v => v.trim()).filter(Boolean),
+        gdrive_exclude_filters:        ((document.getElementById('gdrive_exclude_filters') || {}).value || '').split('\n').map(v => v.trim()).filter(Boolean),
+        gdrive_scan_mode:              (document.getElementById('gdrive_scan_mode') || {}).value || 'new_only',
         multi_tokens:                  collectList('multi_tokens'),
         extra_databases:               collectList('extra_databases'),
         global_search:                 document.getElementById('global_search').checked,
@@ -1659,6 +1701,16 @@ function renderSettings(s) {
     if (wu) wu.value = s.webdav_user || '';
     const wp = document.getElementById('webdav_password');
     if (wp) wp.value = s.webdav_password || '';
+    const gfu = document.getElementById('gdrive_folder_url');
+    if (gfu) gfu.value = s.gdrive_folder_url || '';
+    const giu = document.getElementById('gdrive_index_url');
+    if (giu) giu.value = s.gdrive_index_url || '';
+    const gif = document.getElementById('gdrive_include_filters');
+    if (gif) gif.value = (s.gdrive_include_filters || []).join('\n');
+    const gef = document.getElementById('gdrive_exclude_filters');
+    if (gef) gef.value = (s.gdrive_exclude_filters || []).join('\n');
+    const gsm = document.getElementById('gdrive_scan_mode');
+    if (gsm) gsm.value = s.gdrive_scan_mode || 'new_only';
     toggleMediaflowFields();
 
     const titles = s.channel_titles || {};

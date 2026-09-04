@@ -17,6 +17,7 @@ from Backend.fastapi.routes.api_routes import (
     auto_sync_custom_catalogs_api,
     cancel_dbcheck_api,
     cancel_duplicate_check_api,
+    cancel_gdrive_scan_api,
     cancel_scan_api,
     clear_cache_api,
     clear_stream_analytics_api,
@@ -58,6 +59,7 @@ from Backend.fastapi.routes.api_routes import (
     get_custom_catalog_items_api,
     get_dead_links_api,
     get_media_visibility_api,
+    gdrive_scan_status_api,
     get_requests_api,
     request_popular_api,
     request_search_api,
@@ -104,6 +106,7 @@ from Backend.fastapi.routes.api_routes import (
     speed_test_stream_api,
     start_dbcheck_api,
     start_duplicate_check_api,
+    start_gdrive_scan_api,
     start_scan_api,
     update_auto_catalog_settings_api,
     update_custom_catalog_api,
@@ -811,6 +814,18 @@ async def tools_scan_cancel(_: bool = Depends(require_auth)):
 @app.get("/api/admin/tools/scan/status")
 async def tools_scan_status(_: bool = Depends(require_auth)):
     return await scan_status_api()
+
+@app.post("/api/admin/tools/gdrive-scan/start")
+async def tools_gdrive_scan_start(payload: dict | None = None, _: bool = Depends(require_auth)):
+    return await start_gdrive_scan_api(payload or {})
+
+@app.post("/api/admin/tools/gdrive-scan/cancel")
+async def tools_gdrive_scan_cancel(_: bool = Depends(require_auth)):
+    return await cancel_gdrive_scan_api()
+
+@app.get("/api/admin/tools/gdrive-scan/status")
+async def tools_gdrive_scan_status(_: bool = Depends(require_auth)):
+    return await gdrive_scan_status_api()
 
 @app.post("/api/admin/tools/dbcheck/start")
 async def tools_dbcheck_start(_: bool = Depends(require_auth)):

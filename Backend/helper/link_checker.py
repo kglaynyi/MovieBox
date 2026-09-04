@@ -3,6 +3,7 @@ import asyncio
 from pyrogram.errors import FloodWait
 
 from Backend.helper.encrypt import decode_string
+from Backend.helper.gdrive_source import check_remote_stream_alive
 from Backend.helper.pyro import is_media
 from Backend.logger import LOGGER
 from Backend.pyrofork.bot import multi_clients
@@ -101,6 +102,14 @@ class DeadLinkChecker:
             LOGGER.error(f"Link checker failed to decode {quality_id}: {e}")
             return UNKNOWN
         if not decoded:
+            return UNKNOWN
+
+        if decoded.get("source") == "gdrive":
+            alive = await check_remote_stream_alive(str(decoded.get("url") or ""))
+            if alive is True:
+                return ALIVE
+            if alive is False:
+                return DEAD
             return UNKNOWN
 
         #----- Split file: every part must be alive; one confirmed-dead part kills the link

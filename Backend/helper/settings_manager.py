@@ -33,6 +33,11 @@ _DEFAULTS: Dict[str, Any] = {
     "mediaflow_password": "",
     "webdav_user": "",
     "webdav_password": "",
+    "gdrive_folder_url": "",
+    "gdrive_index_url": "",
+    "gdrive_include_filters": [],
+    "gdrive_exclude_filters": [],
+    "gdrive_scan_mode": "new_only",
     "multi_tokens": [],
     "extra_databases": [],
     "global_search": False,
@@ -204,6 +209,27 @@ class Settings:
     @property
     def webdav_password(self) -> str:
         return str(self._d.get("webdav_password") or "")
+
+    @property
+    def gdrive_folder_url(self) -> str:
+        return str(self._d.get("gdrive_folder_url") or "").strip()
+
+    @property
+    def gdrive_index_url(self) -> str:
+        return str(self._d.get("gdrive_index_url") or "").strip()
+
+    @property
+    def gdrive_include_filters(self) -> List[str]:
+        return [str(v).strip() for v in (self._d.get("gdrive_include_filters") or []) if str(v).strip()]
+
+    @property
+    def gdrive_exclude_filters(self) -> List[str]:
+        return [str(v).strip() for v in (self._d.get("gdrive_exclude_filters") or []) if str(v).strip()]
+
+    @property
+    def gdrive_scan_mode(self) -> str:
+        mode = str(self._d.get("gdrive_scan_mode") or "new_only").strip().lower()
+        return mode if mode in {"new_only", "full_rescan"} else "new_only"
 
     @property
     def payment_instructions(self) -> str:

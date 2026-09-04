@@ -1266,6 +1266,9 @@ class Database:
                 id=part_id,
                 name=name,
                 size=part_size,
+                source=str(metadata_info.get("source") or "telegram"),
+                source_url=metadata_info.get("source_url"),
+                source_path=metadata_info.get("source_path"),
                 group_key=group_key,
                 parts=[QualityPart(**part)],
             )
@@ -1275,6 +1278,9 @@ class Database:
                 id=metadata_info['encoded_string'],
                 name=name,
                 size=size,
+                source=str(metadata_info.get("source") or "telegram"),
+                source_url=metadata_info.get("source_url"),
+                source_path=metadata_info.get("source_path"),
             )
 
         def _as_int(val):
@@ -1407,7 +1413,8 @@ class Database:
     def _dup_key(quality: dict) -> tuple:
         name = re.sub(r"\s+", " ", str(quality.get("name") or "").strip().lower())
         size = str(quality.get("size") or "").strip().lower()
-        return (quality.get("quality"), name, size)
+        source = str(quality.get("source") or "telegram").strip().lower()
+        return (source, quality.get("quality"), name, size)
 
     @staticmethod
     def _is_personal_tmdb(tmdb_id) -> bool:
@@ -1421,6 +1428,7 @@ class Database:
         is_personal: bool = False, status: Optional[dict] = None
     ) -> List[dict]:
         target_quality = quality_to_update.get("quality")
+        target_source = str(quality_to_update.get("source") or "telegram").strip().lower()
         incoming_group_key = quality_to_update.get("group_key")
         replace_mode = SettingsManager.current().replace_mode
 
@@ -1430,6 +1438,7 @@ class Database:
                 stale = [
                     q for q in existing_qualities
                     if q.get("quality") == target_quality
+                    and str(q.get("source") or "telegram").strip().lower() == target_source
                     and q.get("group_key") != incoming_group_key
                 ]
                 for q in stale:
@@ -1438,6 +1447,7 @@ class Database:
                     q for q in existing_qualities
                     if not (
                         q.get("quality") == target_quality
+                        and str(q.get("source") or "telegram").strip().lower() == target_source
                         and q.get("group_key") != incoming_group_key
                     )
                 ]
@@ -1445,11 +1455,19 @@ class Database:
 
         #----- Incoming is a normal (non-split) file.
         if replace_mode:
-            stale = [q for q in existing_qualities if q.get("quality") == target_quality]
+            stale = [
+                q for q in existing_qualities
+                if q.get("quality") == target_quality
+                and str(q.get("source") or "telegram").strip().lower() == target_source
+            ]
             for q in stale:
                 await self._queue_quality_deletion(q)
             existing_qualities = [
-                q for q in existing_qualities if q.get("quality") != target_quality
+                q for q in existing_qualities
+                if not (
+                    q.get("quality") == target_quality
+                    and str(q.get("source") or "telegram").strip().lower() == target_source
+                )
             ]
             existing_qualities.append(quality_to_update)
             return existing_qualities

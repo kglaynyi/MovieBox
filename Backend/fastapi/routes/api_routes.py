@@ -30,6 +30,7 @@ from Backend.helper.backup import export_config, import_config
 from Backend.helper.custom_dl import ByteStreamer, _speed_test_single_client, run_speed_test
 from Backend.helper.encrypt import decode_string, encode_string
 from Backend.helper.health import run_health_checks
+from Backend.helper.gdrive_source import is_safe_remote_url
 from Backend.helper.manual_add import resolve_telegram_message, stamp_caption_by_ref
 from Backend.helper.requests_manager import (
     delete_request,
@@ -51,7 +52,12 @@ from Backend.helper.metadata import (
 )
 from Backend.helper.passwords import hash_password, verify_password
 from Backend.helper.pyro import get_readable_file_size, get_readable_time
-from Backend.helper.scan_manager import dbcheck_manager, duplicate_manager, scan_manager
+from Backend.helper.scan_manager import (
+    dbcheck_manager,
+    duplicate_manager,
+    gdrive_scan_manager,
+    scan_manager,
+)
 from Backend.helper.session_auth import (
     disconnect_session,
     get_session_status,
@@ -1770,7 +1776,16 @@ async def update_settings_api(payload: dict) -> dict:
         if key in payload:
             payload[key] = bool(payload[key])
 
-    list_str_keys = {"auth_channels", "multi_tokens", "extra_databases", "global_search_channels", "anime_channels", "manual_channels"}
+    list_str_keys = {
+        "auth_channels",
+        "multi_tokens",
+        "extra_databases",
+        "global_search_channels",
+        "anime_channels",
+        "manual_channels",
+        "gdrive_include_filters",
+        "gdrive_exclude_filters",
+    }
     for key in list_str_keys:
         if key in payload:
             if not isinstance(payload[key], list):
@@ -1794,6 +1809,12 @@ async def update_settings_api(payload: dict) -> dict:
         except (ValueError, TypeError):
             payload["fanart_shuffle_interval"] = 5
 
+    if "gdrive_scan_mode" in payload:
+        mode = str(payload.get("gdrive_scan_mode") or "").strip().lower()
+        if mode not in {"new_only", "full_rescan"}:
+            raise HTTPException(status_code=400, detail="gdrive_scan_mode must be 'new_only' or 'full_rescan'.")
+        payload["gdrive_scan_mode"] = mode
+
     if len([k for k in ("better_poster_enabled", "rpdb_enabled", "fanart_enabled") if payload.get(k)]) > 1:
         raise HTTPException(status_code=400, detail="Enable only one poster provider at a time")
 
@@ -1807,6 +1828,14 @@ async def update_settings_api(payload: dict) -> dict:
                     status_code=400,
                     detail=f"Invalid database URI (must start with mongodb:// or mongodb+srv://): {uri[:30]}…"
                 )
+
+    for key, label in (("gdrive_index_url", "Google Drive index URL"), ("gdrive_folder_url", "Google Drive folder URL")):
+        if key in payload and payload[key]:
+            val = str(payload[key]).strip()
+            if not val.startswith(("http://", "https://")):
+                raise HTTPException(status_code=400, detail=f"{label} must be an absolute http(s) URL.")
+            if key == "gdrive_index_url" and not is_safe_remote_url(val):
+                raise HTTPException(status_code=400, detail="Google Drive index URL points to a blocked/private host.")
 
     if "approver_ids" in payload:
         if not isinstance(payload["approver_ids"], list):
@@ -1914,7 +1943,7 @@ async def update_settings_api(payload: dict) -> dict:
     for key in ("tmdb_api", "base_url", "upstream_repo", "upstream_branch",
                 "admin_username", "admin_password", "session_secret", "http_proxy_url",
                 "mediaflow_password", "payment_instructions", "payment_qr_url",
-                "announcement_channel", "skip_channel"):
+                "announcement_channel", "skip_channel", "gdrive_folder_url", "gdrive_index_url"):
         if key in payload and isinstance(payload[key], str):
             payload[key] = payload[key].strip()
 
@@ -2236,6 +2265,26 @@ async def cancel_scan_api() -> dict:
 
 async def scan_status_api() -> dict:
     return {"status": "success", "data": scan_manager.get_status()}
+
+
+async def start_gdrive_scan_api(payload: dict | None = None) -> dict:
+    payload = payload or {}
+    mode = str(payload.get("mode", "scan")).lower()
+    if mode not in ("scan", "rescan"):
+        raise HTTPException(status_code=400, detail="mode must be 'scan' or 'rescan'.")
+    result = await gdrive_scan_manager.start(mode=mode)
+    if not result.get("ok"):
+        raise HTTPException(status_code=409, detail=result.get("message", "Could not start Google Drive scan."))
+    return {"status": "success", **result}
+
+
+async def cancel_gdrive_scan_api() -> dict:
+    result = await gdrive_scan_manager.cancel()
+    return {"status": "success" if result.get("ok") else "error", **result}
+
+
+async def gdrive_scan_status_api() -> dict:
+    return {"status": "success", "data": gdrive_scan_manager.get_status()}
 
 
 async def start_dbcheck_api() -> dict:

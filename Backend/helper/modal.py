@@ -17,6 +17,9 @@ class QualityDetail(BaseModel):
     id: str
     name: str
     size: str
+    source: Optional[str] = "telegram"
+    source_url: Optional[str] = None
+    source_path: Optional[str] = None
     group_key: Optional[str] = None
     parts: Optional[List[QualityPart]] = None
 
