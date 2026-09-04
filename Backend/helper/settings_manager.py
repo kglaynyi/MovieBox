@@ -36,6 +36,10 @@ _DEFAULTS: Dict[str, Any] = {
     "gdrive_include_filters": [],
     "gdrive_exclude_filters": [],
     "gdrive_scan_mode": "new_only",
+    "gdrive_source_type": "html",
+    "gdrive_index_username": "",
+    "gdrive_index_password": "",
+    "gdrive_selected_folders": [],
     "multi_tokens": [],
     "extra_databases": [],
     "global_search": False,
@@ -218,6 +222,22 @@ class Settings:
     def gdrive_scan_mode(self) -> str:
         mode = str(self._d.get("gdrive_scan_mode") or "new_only").strip().lower()
         return mode if mode in {"new_only", "full_rescan"} else "new_only"
+
+    @property
+    def gdrive_source_type(self) -> str:
+        return str(self._d.get("gdrive_source_type") or "html")
+
+    @property
+    def gdrive_index_username(self) -> str:
+        return str(self._d.get("gdrive_index_username") or "")
+
+    @property
+    def gdrive_index_password(self) -> str:
+        return str(self._d.get("gdrive_index_password") or "")
+
+    @property
+    def gdrive_selected_folders(self) -> List[str]:
+        return list(self._d.get("gdrive_selected_folders") or [])
 
     @property
     def payment_instructions(self) -> str:
@@ -406,7 +426,8 @@ class SettingsManager:
             results["databases"] = result.get("message", "databases reloaded")
 
         #----- Phase 2: persist and flip the in-memory snapshot
-        await db.save_settings(merged)
+        if not await db.save_settings(merged):
+            raise ValueError("Could not save settings to MongoDB. Check database connectivity and try again.")
         cls._current = Settings(merged)
 
         #----- Phase 3: reinit everything that reads current()
@@ -475,7 +496,8 @@ class SettingsManager:
         if old.get("global_search") != new.get("global_search") and "global_search" not in results:
             results["global_search"] = "enabled" if new.get("global_search") else "disabled"
 
-        gdrive_keys = {"gdrive_folder_url", "gdrive_index_url", "gdrive_include_filters", "gdrive_exclude_filters", "gdrive_scan_mode"}
+        gdrive_keys = {"gdrive_folder_url", "gdrive_index_url", "gdrive_include_filters", "gdrive_exclude_filters", "gdrive_scan_mode",
+                       "gdrive_source_type", "gdrive_index_username", "gdrive_index_password", "gdrive_selected_folders"}
         if any(old.get(k) != new.get(k) for k in gdrive_keys):
             results["gdrive_source"] = "updated — use Tools → Google Drive Scanner to re-index"
 

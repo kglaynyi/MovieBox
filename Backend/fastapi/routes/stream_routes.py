@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 from fastapi.responses import Response as PlainResponse
 from fastapi.responses import StreamingResponse
 from Backend.helper.remote_stream import remote_media_response
+from Backend.helper.settings_manager import SettingsManager
 
 from Backend import db
 from Backend.fastapi.security.tokens import require_stream_token
@@ -275,6 +276,7 @@ async def stream_handler(request: Request, token: str, id: str, name: str, token
             token=token,
             token_data=token_data,
             stream_id_hash=id,
+            source_kind=str(decoded.get("kind") or "html"),
         )
 
     if decoded.get("global"):
@@ -321,7 +323,10 @@ async def gdrive_media_streamer(
     token: str,
     token_data: dict | None = None,
     stream_id_hash: str | None = None,
+    source_kind: str = "html",
 ):
+    if source_kind == "gdi_js" and not await db.is_indexed_gdrive_stream(stream_id_hash, source_url):
+        raise HTTPException(404, "This GDI-JS video is not in the indexed library.")
     stream_id = secrets.token_hex(8)
     started = time.time()
     info = {"stream_id": stream_id, "source": "gdrive", "status": "active",
@@ -340,7 +345,12 @@ async def gdrive_media_streamer(
         ACTIVE_STREAMS.pop(stream_id, None)
         RECENT_STREAMS.appendleft(info)
 
-    response = await remote_media_response(request, source_url, source_name, count_bytes, finished)
+    from Backend.helper.gdi_js import GDIError, media_opener
+    try:
+        opener = media_opener(SettingsManager.current()) if source_kind == "gdi_js" else None
+        response = await remote_media_response(request, source_url, source_name, count_bytes, finished, opener=opener)
+    except GDIError:
+        raise HTTPException(502, "GDI-JS playback unavailable. Ask the administrator to check the index connection.") from None
     if isinstance(response, StreamingResponse):
         ACTIVE_STREAMS[stream_id] = info
         asyncio.create_task(track_usage(stream_id, token, token_data))

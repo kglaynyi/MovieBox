@@ -60,6 +60,9 @@ from Backend.fastapi.routes.api_routes import (
     get_dead_links_api,
     get_media_visibility_api,
     gdrive_scan_status_api,
+    gdrive_folder_config_api,
+    gdrive_folders_api,
+    gdrive_folder_selection_api,
     get_requests_api,
     request_popular_api,
     request_search_api,
@@ -837,6 +840,21 @@ async def tools_gdrive_scan_cancel(_: bool = Depends(require_auth)):
 @app.get("/api/admin/tools/gdrive-scan/status")
 async def tools_gdrive_scan_status(_: bool = Depends(require_auth)):
     return await gdrive_scan_status_api()
+
+
+@app.get("/api/admin/tools/gdrive-folders/config")
+async def tools_gdrive_folder_config(_: bool = Depends(require_auth)):
+    return await gdrive_folder_config_api()
+
+
+@app.post("/api/admin/tools/gdrive-folders/browse")
+async def tools_gdrive_folders(payload: dict, _: bool = Depends(require_auth)):
+    return await gdrive_folders_api(payload)
+
+
+@app.put("/api/admin/tools/gdrive-folders/selection")
+async def tools_gdrive_folder_selection(payload: dict, _: bool = Depends(require_auth)):
+    return await gdrive_folder_selection_api(payload)
 
 @app.post("/api/admin/tools/dbcheck/start")
 async def tools_dbcheck_start(_: bool = Depends(require_auth)):

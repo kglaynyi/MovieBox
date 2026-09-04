@@ -838,6 +838,10 @@ class GDriveScanManager:
             "updated_at": 0.0,
             "finished_at": 0.0,
             "error": None,
+            "phase": "idle",
+            "discovery_pages": 0,
+            "discovery_files": 0,
+            "discovery_folder": "",
         }
 
     def bind_db(self, db) -> None:
@@ -857,6 +861,10 @@ class GDriveScanManager:
             "mode": s["mode"],
             "is_running": s["status"] == "running",
             "resumable": False,
+            "phase": s["phase"],
+            "discovery_pages": s["discovery_pages"],
+            "discovery_files": s["discovery_files"],
+            "discovery_folder": s["discovery_folder"],
             "current_channel_name": s["current_channel_name"],
             "current_channel": "gdrive",
             "current_id": cur,
@@ -904,17 +912,35 @@ class GDriveScanManager:
         s = self.state
         try:
             settings = SettingsManager.current()
-            files = await discover_gdrive_files(
-                index_url=settings.gdrive_index_url,
-                folder_url=settings.gdrive_folder_url,
-                include_filters=settings.gdrive_include_filters,
-                exclude_filters=settings.gdrive_exclude_filters,
-            )
+            s["phase"] = "discovery"
+            if settings.gdrive_source_type == "gdi_js":
+                from Backend.helper.gdi_js import config_from_settings, discover
+
+                def discovery_progress(pages, count, folder):
+                    s.update(discovery_pages=pages, discovery_files=count, discovery_folder=folder)
+
+                files = await discover(
+                    config_from_settings(settings), settings.gdrive_selected_folders,
+                    settings.gdrive_include_filters, settings.gdrive_exclude_filters,
+                    cancelled=lambda: self._cancel, progress=discovery_progress,
+                )
+            else:
+                files = await discover_gdrive_files(
+                    index_url=settings.gdrive_index_url,
+                    folder_url=settings.gdrive_folder_url,
+                    include_filters=settings.gdrive_include_filters,
+                    exclude_filters=settings.gdrive_exclude_filters,
+                )
+            if self._cancel:
+                s["status"] = "cancelled"
+                s["finished_at"] = _now()
+                return
+            s["phase"] = "indexing"
             s["counters"]["total_found"] = len(files)
             s["current_target_id"] = len(files)
             if not files:
                 s["status"] = "error"
-                s["error"] = "No files found. Set Google Drive folder or index URL in Settings."
+                s["error"] = "No matching videos found. Check the source, selected folders and include/exclude filters in Settings."
                 s["finished_at"] = _now()
                 return
 
@@ -937,6 +963,8 @@ class GDriveScanManager:
 
                 try:
                     payload = {"source": "gdrive", "url": source_url, "name": name}
+                    if f.get("kind") == "gdi_js":
+                        payload["kind"] = "gdi_js"
                     stream_id = await encode_string(payload)
                     if (s["mode"] != "rescan") and await self._stream_id_exists(stream_id):
                         s["counters"]["skipped_dup"] += 1

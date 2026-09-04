@@ -322,6 +322,28 @@
             Index video files from Google Drive folder/index configured in Settings.
         </p>
 
+        <div id="gdi-browser" class="mb-4" style="border:1px solid var(--border);border-radius:16px;padding:16px">
+            <p id="gdi-hint" class="hint">Loading source settings…</p>
+            <div id="gdi-controls" hidden>
+                <div class="flex items-center gap-2 flex-wrap mb-2">
+                    <button type="button" class="btn btn-primary" id="gdi-connect">Connect / Browse</button>
+                    <button type="button" class="btn" id="gdi-root">Root</button>
+                    <button type="button" class="btn" id="gdi-up">Up</button>
+                </div>
+                <p id="gdi-path" style="overflow-wrap:anywhere;font-size:.9rem"></p>
+                <label class="flex items-center gap-2 mt-3 mb-3">
+                    <input type="checkbox" id="gdi-current"> Include this folder and its subfolders
+                </label>
+                <div id="gdi-folders" style="max-height:350px;overflow:auto"></div>
+                <button type="button" class="btn mt-3" id="gdi-more" hidden>Load more folders</button>
+                <p class="hint mt-3">Selected folders are saved for later scans. Selecting a parent includes its children.</p>
+                <div id="gdi-selected" style="overflow-wrap:anywhere"></div>
+                <button type="button" class="btn btn-primary mt-3" id="gdi-save">Save folder selection</button>
+                <span id="gdi-saved" class="hint"></span>
+            </div>
+            <p id="gdi-error" role="alert" class="hint mt-3" style="color:#ef4444" hidden></p>
+        </div>
+
         <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
             <div class="text-sm font-bold" id="gd-scan-current">No scan running</div>
             <div class="text-sm" style="color:var(--text-sec)">
@@ -557,6 +579,7 @@
 
 </div>
 
+<script src="/static/gdrive_tools.js?v=1"></script>
 <script>
 /* ─────────────── Manual Upload Session ─────────────── */
 let msResults = [];
@@ -742,7 +765,6 @@ async function loadManualSession() {
 
 /* ─────────────── State ─────────────── */
 let scanTimer = null;
-let gdScanTimer = null;
 let dbcTimer = null;
 let dupTimer = null;
 let dupPurgeTimer = null;
@@ -886,103 +908,6 @@ function renderScan(s) {
                 `Scanning ${name}` + (s.current_id ? ` · up to msg #${s.current_id}` : '');
         }
 
-        /* ─────────────── Google Drive scan control ─────────────── */
-        async function startGDriveScan(mode) {
-            try {
-                const res = await fetch('/api/admin/tools/gdrive-scan/start', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ mode })
-                });
-                const data = await res.json();
-                if (res.ok) {
-                    showToast(data.message || 'Google Drive scan started.', 'success', 'Google Drive');
-                    startGDriveScanPolling();
-                } else {
-                    showToast(data.detail || 'Could not start Google Drive scan.', 'error', 'Error');
-                }
-            } catch (e) {
-                showToast('Network error.', 'error', 'Error');
-            }
-        }
-
-        function confirmGDriveRescan() {
-            if (!confirm('Rescan will refresh discovered Google Drive entries. Existing entries are kept if discovery or matching fails; missing files are not deleted.\n\nProceed?')) return;
-            startGDriveScan('rescan');
-        }
-
-        async function cancelGDriveScan() {
-            try {
-                const res = await fetch('/api/admin/tools/gdrive-scan/cancel', { method: 'POST' });
-                const data = await res.json();
-                showToast(data.message || 'Stop requested.', data.ok ? 'info' : 'error', 'Google Drive');
-            } catch (e) {
-                showToast('Network error.', 'error', 'Error');
-            }
-        }
-
-        function startGDriveScanPolling() {
-            if (gdScanTimer) clearInterval(gdScanTimer);
-            pollGDriveScan();
-            gdScanTimer = setInterval(pollGDriveScan, 1500);
-        }
-
-        async function pollGDriveScan() {
-            try {
-                const res = await fetch('/api/admin/tools/gdrive-scan/status');
-                const data = await res.json();
-                renderGDriveScan(data.data || {});
-            } catch (e) { /* ignore */ }
-        }
-
-        function renderGDriveScan(s) {
-            const pill = document.getElementById('gd-scan-status-pill');
-            const status = s.status || 'idle';
-            pill.className = 'status-pill status-' + status;
-            pill.textContent = status.charAt(0).toUpperCase() + status.slice(1);
-
-            const c = s.counters || {};
-            setText('gd-processed', c.processed || 0);
-            setText('gd-indexed', c.indexed || 0);
-            setText('gd-dup', c.skipped_dup || 0);
-            setText('gd-meta', c.skipped_meta || 0);
-            setText('gd-nonvid', c.skipped_nonvid || 0);
-            setText('gd-errors', c.errors || 0);
-            setText('gd-scan-elapsed', s.elapsed || '0s');
-
-            const bar = document.getElementById('gd-scan-bar');
-            const startBtn = document.getElementById('gd-scan-start-btn');
-            const cancelBtn = document.getElementById('gd-scan-cancel-btn');
-            const rescanBtn = document.getElementById('gd-rescan-btn');
-            const errEl = document.getElementById('gd-scan-error');
-            const currentEl = document.getElementById('gd-scan-current');
-
-            if (s.is_running) {
-                if (s.has_progress && s.current_target_id) {
-                    bar.classList.remove('indeterminate');
-                    bar.style.width = (s.progress || 0) + '%';
-                    currentEl.textContent = `Scanning · ${s.current_id || 0}/${s.current_target_id || 0} (${s.progress || 0}%)`;
-                } else {
-                    bar.classList.add('indeterminate');
-                    currentEl.textContent = 'Scanning Google Drive source...';
-                }
-                startBtn.disabled = true; rescanBtn.disabled = true; cancelBtn.disabled = false;
-                errEl.style.display = 'none';
-            } else {
-                bar.classList.remove('indeterminate');
-                startBtn.disabled = false; rescanBtn.disabled = false; cancelBtn.disabled = true;
-                bar.style.width = status === 'completed' ? '100%' : '0%';
-                currentEl.textContent =
-                    status === 'completed' ? 'Scan complete.' :
-                    status === 'cancelled' ? 'Stopped.' :
-                    status === 'error' ? 'Scan failed.' : 'No scan running';
-                if (s.error) { errEl.style.display = ''; errEl.textContent = s.error; }
-                else errEl.style.display = 'none';
-                if (gdScanTimer && ['completed', 'cancelled', 'error', 'idle'].includes(status)) {
-                    clearInterval(gdScanTimer); gdScanTimer = null;
-                }
-            }
-        }
         startBtn.disabled = true; rescanBtn.disabled = true; cancelBtn.disabled = false;
         errEl.style.display = 'none';
     } else {
@@ -1587,10 +1512,7 @@ pollScan().then(() => {
     const pill = document.getElementById('scan-status-pill');
     if (pill.classList.contains('status-running')) startScanPolling();
 });
-pollGDriveScan().then(() => {
-    const pill = document.getElementById('gd-scan-status-pill');
-    if (pill.classList.contains('status-running')) startGDriveScanPolling();
-});
+initGDriveTools();
 pollDbc().then(() => {
     const pill = document.getElementById('dbc-status-pill');
     if (pill.classList.contains('status-running')) startDbcPolling();

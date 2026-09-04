@@ -120,6 +120,8 @@ class Database:
                 await db[collection_name].create_index([("tmdb_id", ASCENDING)])
                 await db[collection_name].create_index([("imdb_id", ASCENDING)])
                 await db[collection_name].create_index([("kitsu_id", ASCENDING)])
+                stream_path = "telegram.id" if collection_name == "movie" else "seasons.episodes.telegram.id"
+                await db[collection_name].create_index([(stream_path, ASCENDING)])
             except Exception as e:
                 LOGGER.error(f"Failed creating index on {db_key}/{collection_name}: {e}")
 
@@ -2053,6 +2055,19 @@ class Database:
             LOGGER.info(f"{media_type} with tmdb_id {tmdb_id} deleted successfully.")
             return True
         LOGGER.info(f"No document found with tmdb_id {tmdb_id}.")
+        return False
+
+    async def is_indexed_gdrive_stream(self, stream_id_hash: str, source_url: str) -> bool:
+        """Do not let a forged addon URL use server credentials for arbitrary index files."""
+        if not stream_id_hash or not source_url:
+            return False
+        quality = {"id": stream_id_hash, "source": "gdrive", "source_url": source_url}
+        for key, storage in self.dbs.items():
+            if not key.startswith("storage_"):
+                continue
+            for collection, field in (("movie", "telegram"), ("tv", "seasons.episodes.telegram")):
+                if await storage[collection].find_one({field: {"$elemMatch": quality}}, {"_id": 1}):
+                    return True
         return False
 
     async def get_title_by_stream_id(self, stream_id_hash: str) -> Optional[str]:
