@@ -487,4 +487,8 @@ class SettingsManager:
         if old.get("global_search") != new.get("global_search") and "global_search" not in results:
             results["global_search"] = "enabled" if new.get("global_search") else "disabled"
 
+        gdrive_keys = {"gdrive_folder_url", "gdrive_index_url", "gdrive_include_filters", "gdrive_exclude_filters", "gdrive_scan_mode"}
+        if any(old.get(k) != new.get(k) for k in gdrive_keys):
+            results["gdrive_source"] = "updated — use Tools → Google Drive Scanner to re-index"
+
         return results

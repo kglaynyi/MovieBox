@@ -487,7 +487,7 @@ async def get_manifest(token: str, token_data: dict = Depends(verify_token)):
 
 
     addon_name = ADDON_NAME
-    addon_desc = "Streams movies and series from your Telegram."
+    addon_desc = "Streams movies and series from your Telegram and configured sources."
     addon_version = ADDON_VERSION
 
     #----- Show expiry info in the addon: token's own expiry first, else the subscription
@@ -504,7 +504,7 @@ async def get_manifest(token: str, token_data: dict = Depends(verify_token)):
             expiry_str = expiry_obj.strftime("%d %b %Y").lstrip("0")
             addon_desc = (
                 f"📅 Access active until {expiry_str}.\n"
-                f"Streams movies and series from your Telegram."
+                f"Streams movies and series from your Telegram and configured sources."
             )
             epoch_tag = format(int(expiry_obj.timestamp()) & 0xFFFF, "x")
             addon_version = f"{ADDON_VERSION}-{epoch_tag}"
