@@ -1,6 +1,8 @@
 import re
 import secrets
 import string
+import asyncio
+import time
 from asyncio import create_task
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
@@ -42,6 +44,9 @@ class Database:
         self.dbs: Dict[str, motor.motor_asyncio.AsyncIOMotorDatabase] = {}
 
         self.current_db_index = 1
+        self._stats_cache = []
+        self._stats_cached_at = 0.0
+        self._stats_lock = asyncio.Lock()
 
     async def connect(self):
         try:
@@ -2202,13 +2207,24 @@ class Database:
 
     #----- Get per-DB statistics (movies, tv shows, used size, etc.)
     async def get_database_stats(self):
+        async with self._stats_lock:
+            if time.monotonic() - self._stats_cached_at < 30:
+                return self._stats_cache
+            stats = await asyncio.wait_for(self._fetch_database_stats(), timeout=10)
+            self._stats_cache = stats
+            self._stats_cached_at = time.monotonic()
+            return stats
+
+    async def _fetch_database_stats(self):
         stats = []
         for key in self.dbs.keys():
             if key.startswith("storage_"):
                 db = self.dbs[key]
-                movie_count = await db["movie"].count_documents({})
-                tv_count = await db["tv"].count_documents({})
-                db_stats = await db.command("dbstats")
+                movie_count, tv_count, db_stats = await asyncio.gather(
+                    db["movie"].count_documents({}),
+                    db["tv"].count_documents({}),
+                    db.command("dbstats"),
+                )
                 stats.append({
                     "db_name": key,
                     "movie_count": movie_count,
