@@ -145,8 +145,8 @@ from Backend.pyrofork.bot import work_loads_summary
 templates = Jinja2Templates(directory="Backend/fastapi/templates")
 
 app = FastAPI(
-    title="Telegram Stremio Media Server",
-    description="A powerful, self-hosted Telegram Stremio Media Server built with FastAPI, MongoDB, and PyroFork seamlessly integrated with Stremio for automated media streaming and discovery.",
+    title="NLYNN Media Server",
+    description="A powerful, self-hosted NLYNN Media Server built with FastAPI, MongoDB, and PyroFork seamlessly integrated with Stremio for automated media streaming and discovery.",
     version=__version__
 )
 
@@ -199,9 +199,9 @@ async def pwa_manifest(request: Request):
     theme = get_theme(theme_name)
     return JSONResponse(
         {
-            "name": "Telegram Stremio",
-            "short_name": "TG Stremio",
-            "description": "Telegram Stremio media management",
+            "name": "NLYNN",
+            "short_name": "NLYNN",
+            "description": "NLYNN media management",
             "start_url": "/",
             "scope": "/",
             "display": "standalone",
