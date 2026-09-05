@@ -24,6 +24,14 @@ def _collect_stream_bytes(stream_id: str, seen: dict) -> bool:
     return active
 
 
+def _stop_stream_at_limit(stream_id: str) -> None:
+    prefix = f"{stream_id}-p"
+    for sid, info in ACTIVE_STREAMS.items():
+        if sid == stream_id or (sid and sid.startswith(prefix)):
+            info["limit_reached"] = True
+            info["status"] = "limit_reached"
+
+
 #----- Periodically accrue a token's bandwidth usage until the stream goes quiet
 async def track_usage(stream_id: str, token: str, token_data: dict):
     await asyncio.sleep(2)
@@ -60,9 +68,11 @@ async def track_usage(stream_id: str, token: str, token_data: dict):
             if daily_limit_gb and daily_limit_gb > 0:
                 if (initial_daily_bytes + current_bytes) / (1024 ** 3) >= daily_limit_gb:
                     LOGGER.debug(f"Daily limit reached for stream {stream_id}")
+                    _stop_stream_at_limit(stream_id)
             if monthly_limit_gb and monthly_limit_gb > 0:
                 if (initial_monthly_bytes + current_bytes) / (1024 ** 3) >= monthly_limit_gb:
                     LOGGER.debug(f"Monthly limit reached for stream {stream_id}")
+                    _stop_stream_at_limit(stream_id)
 
             if active:
                 started = True

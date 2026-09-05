@@ -3,7 +3,7 @@ import json
 import os
 import random
 import secrets
-from datetime import datetime
+from datetime import datetime, timezone
 from time import time
 
 from fastapi import HTTPException, Query, Request
@@ -336,6 +336,18 @@ def _parse_limit(val):
         return None
 
 
+def _parse_days(payload: dict, action: str) -> int:
+    raw_days = payload.get("days", 0)
+    if isinstance(raw_days, bool) or not str(raw_days).strip().isdigit():
+        raise HTTPException(status_code=400, detail="Days must be a whole number.") from None
+    days = int(str(raw_days).strip())
+    if days < 0 or (action in {"extend", "reduce"} and days < 1):
+        raise HTTPException(status_code=400, detail="Days must be at least 1 for extend/reduce.")
+    if days > 36500:
+        raise HTTPException(status_code=400, detail="Days is too large.")
+    return days
+
+
 async def create_token_api(payload: dict):
     try:
         token_name = payload.get("name")
@@ -366,17 +378,21 @@ async def set_token_lifetime_api(token: str, payload: dict) -> dict:
 #----- Set/extend/reduce a token's own expiry (subscription-off mode).
 #----- Optionally attach a Telegram user id at the same time.
 async def set_token_expiry_api(token: str, payload: dict) -> dict:
+    action = str(payload.get("action") or "set").lower()
+    if action not in {"set", "extend", "reduce"}:
+        raise HTTPException(status_code=400, detail="Invalid expiry action.")
+    days = _parse_days(payload, action)
     user_id = payload.get("user_id")
     if user_id not in (None, "", 0, "0"):
         try:
             uid = int(user_id)
+            if uid <= 0 or str(user_id).strip() != str(uid):
+                raise ValueError
         except (TypeError, ValueError):
             raise HTTPException(status_code=400, detail="Invalid Telegram user id.")
         #----- Enforces one-user-one-token + pulls the real Telegram name
         await link_token_user_api(token, uid)
 
-    action = str(payload.get("action") or "set")
-    days = int(payload.get("days") or 0)
     result = await db.update_token_expiry(token, action, days)
     if not result:
         raise HTTPException(status_code=404, detail="Token not found.")
@@ -413,15 +429,19 @@ async def update_token_limits_api(token: str, payload: dict):
         daily_limit = payload.get("daily_limit_gb")
         monthly_limit = payload.get("monthly_limit_gb")
 
-        await db.update_api_token_limits(
+        updated = await db.update_api_token_limits(
             token,
             _parse_limit(daily_limit),
             _parse_limit(monthly_limit),
             positive_int(payload.get("max_devices")),
             positive_int(payload.get("max_concurrent_streams")),
         )
+        if not updated:
+            raise HTTPException(status_code=404, detail="Token not found")
         return {"message": "Limits updated successfully"}
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -756,10 +776,12 @@ async def get_all_subscribers_api() -> dict:
 async def manage_subscriber_api(user_id: int, payload: dict) -> dict:
     try:
         action = payload.get("action")
-        days = int(payload.get("days", 0))
+        if user_id <= 0:
+            raise HTTPException(status_code=400, detail="Invalid Telegram user id")
 
         if action not in ["extend", "reduce", "delete", "remove"]:
             raise HTTPException(status_code=400, detail="Invalid action")
+        days = _parse_days(payload, action) if action in {"extend", "reduce"} else 0
 
         success = await db.manage_subscriber(user_id, action, days)
 
@@ -797,6 +819,12 @@ async def get_all_tokens_api() -> dict:
         tokens = await db.get_all_api_tokens()
         now = datetime.utcnow()
         result = []
+
+        def expired(value):
+            if not value:
+                return False
+            reference = datetime.now(timezone.utc) if value.tzinfo else now
+            return value < reference
 
         #----- Pre-load subscribers keyed by user_id for O(1) lookup
         subscriber_map = {}
@@ -840,16 +868,16 @@ async def get_all_tokens_api() -> dict:
             #----- admin grant, otherwise fall back to the subscription's expiry.
             if not sub_on:
                 expiry = token_expiry
-                is_expired = False
+                is_expired = expired(token_expiry)
             elif is_admin or lifetime:
                 expiry = None
                 is_expired = False
             elif token_expiry is not None:
                 expiry = token_expiry
-                is_expired = token_expiry < now
+                is_expired = expired(token_expiry)
             elif user_found and sub_status == "active" and user_sub_expiry:
                 expiry = user_sub_expiry
-                is_expired = user_sub_expiry < now
+                is_expired = expired(user_sub_expiry)
             else:
                 expiry = user_sub_expiry
                 is_expired = True
@@ -857,7 +885,7 @@ async def get_all_tokens_api() -> dict:
             created = token_doc.get("created_at") or (user.get("created_at") if user else None)
             limits = token_doc.get("limits") or {}
             usage = token_doc.get("usage") or {}
-            has_active_sub = sub_on and user_found and sub_status == "active" and bool(user_sub_expiry) and user_sub_expiry > now
+            has_active_sub = sub_on and user_found and sub_status == "active" and bool(user_sub_expiry) and not expired(user_sub_expiry)
             never_expires = not expiry and (is_admin or lifetime or not sub_on)
 
             return {
@@ -934,6 +962,8 @@ async def revoke_token_api(token: str) -> dict:
 #----- Assign or extend a subscription for any user_id
 async def assign_plan_api(user_id: int, days: int) -> dict:
     try:
+        if user_id <= 0 or days < 0 or days > 36500:
+            raise HTTPException(status_code=400, detail="Invalid user or days")
         #----- Use the real Telegram name so the Plans page shows it (not "User <id>")
         name = await _fetch_tg_name(user_id)
         #----- 0 / empty days means "never expires"
@@ -965,6 +995,8 @@ async def _fetch_tg_name(user_id: int):
 #----- Link an orphan token to a Telegram user_id (one user_id = one token)
 async def link_token_user_api(token: str, user_id: int) -> dict:
     try:
+        if int(user_id) <= 0:
+            raise HTTPException(status_code=400, detail="Invalid Telegram user id")
         existing = await db.get_api_token_by_user(user_id)
         if existing and existing.get("token") == token:
             return {"status": "success", "message": f"Already linked to user {user_id}."}

@@ -2439,7 +2439,7 @@ class Database:
                 }
             }}
         )
-        return result.modified_count > 0
+        return result.matched_count > 0
 
     #-----
     #----- Admin / Link Checker Methods

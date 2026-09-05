@@ -344,8 +344,11 @@ async def gdrive_media_streamer(
                      "user_name": (token_data or {}).get("name", "Unknown")}}
 
     def count_bytes(size):
+        if info.get("limit_reached"):
+            return False
         info["total_bytes"] += size
         info["avg_mbps"] = info["total_bytes"] / (1024 ** 2) / max(time.time() - started, 0.001)
+        return True
 
     def finished():
         info["end_ts"] = time.time()

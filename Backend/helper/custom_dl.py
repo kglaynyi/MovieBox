@@ -342,6 +342,10 @@ class ByteStreamer:
                     if off is None and chunk is None:
                         break
 
+                    if ACTIVE_STREAMS.get(stream_id, {}).get("limit_reached"):
+                        stop_event.set()
+                        break
+
                     if part_count == 1:
                         out_chunk = chunk[first_part_cut:last_part_cut]
                     elif current_part_idx == 1:
