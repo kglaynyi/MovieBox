@@ -273,8 +273,8 @@
     <div class="modal-glass">
         <div class="flex items-start justify-between gap-4 mb-5">
             <div>
-                <h3 class="text-xl font-bold section-title">Edit Data Limits</h3>
-                <p class="text-sm text-soft mt-1">Set 0 for unlimited.</p>
+                <h3 class="text-xl font-bold section-title">Edit Access Limits</h3>
+                <p class="text-sm text-soft mt-1">Set 0 for unlimited. Device identity uses client app, platform and network.</p>
             </div>
             <button onclick="closeModal('limits-modal')" class="glass-btn rounded-full w-10 h-10 flex items-center justify-center"><i class="fas fa-xmark"></i></button>
         </div>
@@ -289,7 +289,19 @@
                 <input type="number" id="limits-monthly" min="0" step="0.1" class="glass-input">
             </div>
         </div>
+        <div class="grid grid-cols-2 gap-3 mt-3">
+            <div class="modal-field">
+                <label>Registered devices</label>
+                <input type="number" id="limits-devices" min="0" step="1" class="glass-input">
+            </div>
+            <div class="modal-field">
+                <label>Simultaneous devices</label>
+                <input type="number" id="limits-concurrent" min="0" step="1" class="glass-input">
+            </div>
+        </div>
+        <p id="limits-device-count" class="text-xs text-soft mt-3"></p>
         <div class="flex flex-col-reverse sm:flex-row justify-end gap-3 pt-6">
+            <button onclick="resetDevices()" class="glass-btn rounded-2xl px-5 py-3 text-sm font-bold">Reset Devices</button>
             <button onclick="closeModal('limits-modal')" class="glass-btn rounded-2xl px-5 py-3 text-sm font-bold">Cancel</button>
             <button onclick="saveLimits()" class="glass-btn glass-btn-primary rounded-2xl px-5 py-3 text-sm font-bold">Save</button>
         </div>
@@ -431,7 +443,7 @@
         const tokenArg = t.token ? escHtml(t.token) : '';
 
         if (t.has_token) {
-            btns += `<button onclick="openLimitsModal('${tokenArg}', ${t.daily_limit_gb || 0}, ${t.monthly_limit_gb || 0})" class="action-chip glass-btn">Limits</button>`;
+            btns += `<button onclick="openLimitsModal('${tokenArg}', ${t.daily_limit_gb || 0}, ${t.monthly_limit_gb || 0}, ${t.max_devices || 0}, ${t.max_concurrent_streams || 0}, ${t.registered_devices || 0})" class="action-chip glass-btn">Limits</button>`;
         }
 
         if (subEnabled) {
@@ -603,10 +615,13 @@
         } catch (err) { showToast('Error: ' + err.message, 'error', 'Network Error'); }
     }
 
-    function openLimitsModal(token, daily, monthly) {
+    function openLimitsModal(token, daily, monthly, devices, concurrent, registered) {
         document.getElementById('limits-token').value = token;
         document.getElementById('limits-daily').value = daily || 0;
         document.getElementById('limits-monthly').value = monthly || 0;
+        document.getElementById('limits-devices').value = devices || 0;
+        document.getElementById('limits-concurrent').value = concurrent || 0;
+        document.getElementById('limits-device-count').textContent = `${registered || 0} device signature(s) currently registered.`;
         openModal('limits-modal');
     }
 
@@ -615,12 +630,26 @@
         const payload = {
             daily_limit_gb: Number(document.getElementById('limits-daily').value || 0),
             monthly_limit_gb: Number(document.getElementById('limits-monthly').value || 0),
+            max_devices: Number(document.getElementById('limits-devices').value || 0),
+            max_concurrent_streams: Number(document.getElementById('limits-concurrent').value || 0),
         };
         try {
             const resp = await fetch('/api/tokens/' + encodeURIComponent(token), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
             if (resp.ok) { showToast('Limits updated.', 'success', 'Updated'); closeModal('limits-modal'); loadTokens(); }
             else { showToast('Failed to update limits.', 'error', 'Failed'); }
         } catch (err) { showToast('Error: ' + err.message, 'error', 'Network Error'); }
+    }
+
+    async function resetDevices() {
+        const token = document.getElementById('limits-token').value;
+        if (!confirm('Reset every registered device and active playback slot for this token?')) return;
+        try {
+            const resp = await fetch('/api/tokens/' + encodeURIComponent(token) + '/devices', { method: 'DELETE' });
+            if (!resp.ok) throw new Error('Reset failed');
+            document.getElementById('limits-device-count').textContent = '0 device signatures currently registered.';
+            showToast('Devices reset.', 'success', 'Updated');
+            loadTokens();
+        } catch (err) { showToast('Error: ' + err.message, 'error', 'Reset Failed'); }
     }
 
     async function revokeToken(token) {

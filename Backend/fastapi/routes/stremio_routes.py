@@ -14,6 +14,7 @@ from pyrogram.errors import UserNotParticipant
 from Backend import __version__, db
 from Backend.config import Telegram
 from Backend.helper.analytics import client_ip_from, record_client
+from Backend.helper.device_control import register_device
 from Backend.fastapi.security.tokens import verify_token
 from Backend.fastapi.themes import DEFAULT_THEME, get_theme
 from Backend.helper.fanart import fanart_artwork
@@ -947,6 +948,13 @@ async def get_streams(
     request: Request,
     token_data: dict = Depends(verify_token)
 ):
+    device_allowed, device_id = await register_device(db, token, request)
+    if not device_allowed:
+        return {"streams": [{
+            "name": "🚫 Device Limit",
+            "title": "This token has reached its registered-device limit. Ask the administrator to reset its devices.",
+            "url": f"tg://user?id={Telegram.OWNER_ID}",
+        }]}
     #----- Capture the real app/device from the addon-protocol UA (not the spoofed video UA)
     asyncio.create_task(record_client(
         token,
@@ -1059,7 +1067,7 @@ async def get_streams(
                     if label.lower() not in stream_name.lower():
                         stream_name = f"{stream_name} {label}"
 
-                original_url = f"{SettingsManager.current().base_url}/dl/{token}/{quality.get('id')}/video.mkv"
+                original_url = f"{SettingsManager.current().base_url}/dl/{token}/{quality.get('id')}/video.mkv?device={device_id}"
                 proxy_url = build_proxy_url(original_url)
 
                 if SettingsManager.current().show_proxy_and_non_proxy_both and proxy_url:
@@ -1116,6 +1124,9 @@ async def get_streams(
 
     seen: dict = {}
     for s in streams:
+        url = str(s.get("url") or "")
+        if "/dl/" in url and "device=" not in url:
+            s["url"] = url + ("&" if "?" in url else "?") + f"device={device_id}"
         if name_count[s["name"]] > 1:
             seen[s["name"]] = seen.get(s["name"], 0) + 1
             s["name"] = f"{s['name']} ({seen[s['name']]})"

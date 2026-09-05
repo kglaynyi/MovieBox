@@ -18,6 +18,7 @@ from Backend import db
 from Backend.fastapi.security.tokens import require_stream_token
 from Backend.fastapi.security.credentials import require_auth
 from Backend.helper.analytics import client_ip_from, record_stream_start
+from Backend.helper.device_control import acquire_playback_slot, device_signature
 from Backend.helper.custom_dl import ACTIVE_STREAMS, RECENT_STREAMS, ByteStreamer
 from Backend.helper.encrypt import decode_string
 from Backend.helper.utils import track_usage
@@ -260,6 +261,9 @@ async def subtitle_handler(token: str, id: str, name: str, token_data: dict = De
 @router.get("/dl/{token}/{id}/{name}")
 @router.head("/dl/{token}/{id}/{name}")
 async def stream_handler(request: Request, token: str, id: str, name: str, token_data: dict = Depends(require_stream_token)):
+    device_id = request.query_params.get("device") or device_signature(token, request)[0]
+    if not await acquire_playback_slot(db, token, device_id):
+        raise HTTPException(status_code=429, detail="Simultaneous playback-device limit reached")
     if request.method != "HEAD":
         asyncio.create_task(record_stream_start(
             token,
