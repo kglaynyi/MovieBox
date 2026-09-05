@@ -16,6 +16,7 @@ from Backend.helper.gdrive_source import (
     is_video_filename,
 )
 from Backend.helper.metadata import metadata, extract_default_id
+from Backend.helper.message_media import media_message_title
 from Backend.helper.pyro import clean_filename, finalize_media_name, get_readable_file_size
 from Backend.helper.skip_channel import is_skip_channel, route_to_skip_channel
 from Backend.helper.split_files import parse_split_info
@@ -470,7 +471,7 @@ class ScanManager:
             return
 
         file = message.video or message.document
-        title = message.caption or file.file_name
+        title = media_message_title(message)
         msg_id = message.id
         raw_size = file.file_size
         size = get_readable_file_size(file.file_size)
