@@ -454,14 +454,18 @@ async def delete_access_token(token: str, _: bool = Depends(require_auth)):
 
 @app.post("/api/admin/access/users/{user_id}/assign-plan")
 async def assign_access_plan(user_id: int, payload: dict, _: bool = Depends(require_auth)):
-    days = int(payload.get("days", 0))
+    raw_days = str(payload.get("days", 0)).strip()
+    if not raw_days.isdigit():
+        raise HTTPException(status_code=400, detail="Days must be a whole number.")
+    days = int(raw_days)
     return await assign_plan_api(user_id, days)
 
 @app.patch("/api/admin/access/tokens/{token}/link-user")
 async def link_token_to_user(token: str, payload: dict, _: bool = Depends(require_auth)):
-    user_id = int(payload.get("user_id", 0))
-    if not user_id:
-        raise HTTPException(status_code=400, detail="user_id is required.")
+    raw_user_id = str(payload.get("user_id", "")).strip()
+    if not raw_user_id.isdigit() or int(raw_user_id) <= 0:
+        raise HTTPException(status_code=400, detail="A valid numeric user_id is required.")
+    user_id = int(raw_user_id)
     return await link_token_user_api(token, user_id)
 
 @app.patch("/api/admin/access/tokens/{token}/lifetime")

@@ -22,7 +22,8 @@ class RemoteStreamingResponse(StreamingResponse):
         async def chunks():
             async for chunk in upstream.aiter_raw(chunk_size=256 * 1024):
                 if on_chunk:
-                    on_chunk(len(chunk))
+                    if on_chunk(len(chunk)) is False:
+                        break
                 yield chunk
 
         super().__init__(chunks(), status_code=upstream.status_code, headers=headers)

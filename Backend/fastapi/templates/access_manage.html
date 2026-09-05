@@ -663,7 +663,7 @@
 
     async function linkUser(token) {
         const userId = prompt('Enter the Telegram User ID to link this token to:');
-        if (!userId || isNaN(parseInt(userId))) { showToast('Invalid user ID.', 'error', 'Invalid Input'); return; }
+        if (!userId || !/^\d+$/.test(userId.trim()) || Number(userId) <= 0) { showToast('Enter digits only for the Telegram user ID.', 'error', 'Invalid Input'); return; }
         try {
             const resp = await fetch('/api/admin/access/tokens/' + encodeURIComponent(token) + '/link-user', {
                 method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user_id: parseInt(userId) }),
@@ -695,9 +695,12 @@
     }
 
     async function assignPlan() {
-        const customDays = parseInt(document.getElementById('assign-custom-days').value) || 0;
+        const customRaw = document.getElementById('assign-custom-days').value.trim();
+        if (customRaw && !/^\d+$/.test(customRaw)) { showToast('Enter a valid whole number of days.', 'error', 'Invalid Input'); return; }
+        const customDays = Number(customRaw || 0);
         const planDays = parseInt(document.getElementById('assign-plan-select').value) || 0;
         const days = customDays || planDays;  // 0 = never expires
+        if (!Number.isInteger(days) || days < 0 || days > 36500) { showToast('Enter a valid whole number of days (maximum 36500).', 'error', 'Invalid Input'); return; }
         try {
             let resp;
             if (subEnabled) {
@@ -707,7 +710,9 @@
                 });
             } else {
                 const token = document.getElementById('assign-token').value;
-                const uid = parseInt(document.getElementById('assign-userid').value) || 0;
+                const uidRaw = document.getElementById('assign-userid').value.trim();
+                if (uidRaw && (!/^\d+$/.test(uidRaw) || Number(uidRaw) <= 0)) { showToast('Enter digits only for the Telegram user ID.', 'error', 'Invalid Input'); return; }
+                const uid = Number(uidRaw || 0);
                 const body = { action: 'set', days };
                 if (uid) body.user_id = uid;
                 resp = await fetch(`/api/admin/access/tokens/${encodeURIComponent(token)}/expiry`, {
@@ -745,7 +750,10 @@
 
     async function submitSubAction() {
         const action = document.getElementById('sub-action-action').value;
-        const days = parseInt(document.getElementById('sub-action-days').value) || 0;
+        const daysRaw = document.getElementById('sub-action-days').value.trim();
+        const days = Number(daysRaw || 0);
+        if (action !== 'delete' && !/^\d+$/.test(daysRaw)) { showToast('Enter a whole number of days.', 'error', 'Invalid Input'); return; }
+        if (action !== 'delete' && (!Number.isInteger(days) || days < 1)) { showToast('Enter at least 1 day.', 'error', 'Invalid Input'); return; }
         try {
             let resp;
             if (subEnabled) {
