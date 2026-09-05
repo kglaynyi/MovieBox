@@ -14,6 +14,7 @@ from Backend.helper.encrypt import encode_string
 from Backend.helper.manual_add import resolve_telegram_message, stamp_caption_with_id
 from Backend.helper.requests_manager import auto_fulfill
 from Backend.helper.metadata import extract_default_id, metadata
+from Backend.helper.message_media import media_message_title
 from Backend.helper.pyro import clean_filename, finalize_media_name, get_readable_file_size
 from Backend.helper.settings_manager import SettingsManager
 from Backend.helper.skip_channel import is_skip_channel, route_to_skip_channel
@@ -54,7 +55,7 @@ def _is_manual_channel(chat_id) -> bool:
 #----- Common message field extraction shared by the channel handlers
 def _extract_fields(message: Message):
     file = message.video or message.document
-    title = message.caption or file.file_name
+    title = media_message_title(message)
     channel = str(message.chat.id).replace("-100", "")
     return file, title, message.id, file.file_size, get_readable_file_size(file.file_size), channel
 
