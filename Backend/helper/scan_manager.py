@@ -16,7 +16,7 @@ from Backend.helper.gdrive_source import (
     is_video_filename,
 )
 from Backend.helper.metadata import metadata, extract_default_id
-from Backend.helper.message_media import media_message_title
+from Backend.helper.message_media import media_message_title, telegram_scene_filename
 from Backend.helper.pyro import clean_filename, finalize_media_name, get_readable_file_size
 from Backend.helper.skip_channel import is_skip_channel, route_to_skip_channel
 from Backend.helper.split_files import parse_split_info
@@ -488,6 +488,7 @@ class ScanManager:
             metadata_info = await metadata(
                 clean_filename(title), channel_int, msg_id,
                 override_id=extract_default_id(message.caption or ""),
+                scene_filename=telegram_scene_filename(channel_int),
             )
         except Exception as e:
             LOGGER.warning(f"[ScanManager] Metadata exception for msg {msg_id}: {e}")

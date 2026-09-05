@@ -1,8 +1,9 @@
 """Telegram forwarded/captioned video title selection regressions."""
 from types import SimpleNamespace
 from unittest import TestCase
+from unittest.mock import patch
 
-from Backend.helper.message_media import media_message_title
+from Backend.helper.message_media import media_message_title, telegram_scene_filename
 
 
 def message(filename, caption):
@@ -23,3 +24,9 @@ class ForwardedMediaTitleTests(TestCase):
 
     def test_filename_without_caption_is_kept(self):
         self.assertEqual(media_message_title(message("Movie.2025.mkv", None)), "Movie.2025.mkv")
+
+    def test_non_anime_telegram_channel_uses_scene_parser(self):
+        with patch("Backend.helper.message_media.SettingsManager.current") as current:
+            current.return_value.anime_channels = ["999"]
+            self.assertTrue(telegram_scene_filename(123))
+            self.assertFalse(telegram_scene_filename(-100999))
