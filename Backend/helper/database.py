@@ -2426,13 +2426,16 @@ class Database:
             }
         )
 
-    async def update_api_token_limits(self, token: str, daily_limit_gb: float, monthly_limit_gb: float) -> bool:
+    async def update_api_token_limits(self, token: str, daily_limit_gb: float, monthly_limit_gb: float,
+                                      max_devices: int = 0, max_concurrent_streams: int = 0) -> bool:
         result = await self.dbs["tracking"]["api_tokens"].update_one(
             {"token": token},
             {"$set": {
                 "limits": {
                     "daily_limit_gb": daily_limit_gb if daily_limit_gb else 0,
-                    "monthly_limit_gb": monthly_limit_gb if monthly_limit_gb else 0
+                    "monthly_limit_gb": monthly_limit_gb if monthly_limit_gb else 0,
+                    "max_devices": max(0, int(max_devices or 0)),
+                    "max_concurrent_streams": max(0, int(max_concurrent_streams or 0)),
                 }
             }}
         )

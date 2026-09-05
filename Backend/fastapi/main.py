@@ -118,6 +118,7 @@ from Backend.fastapi.routes.api_routes import (
     update_settings_api,
     update_subscription_plan_api,
     update_token_limits_api,
+    reset_token_devices_api,
 )
 from Backend.fastapi.routes.stream_routes import decay_client_failures
 from Backend.fastapi.routes.stream_routes import router as stream_router
@@ -372,6 +373,10 @@ async def create_token(payload: dict, _: bool = Depends(require_auth)):
 @app.put("/api/tokens/{token}")
 async def update_token(token: str, payload: dict, _: bool = Depends(require_auth)):
     return await update_token_limits_api(token, payload)
+
+@app.delete("/api/tokens/{token}/devices")
+async def reset_token_devices(token: str, _: bool = Depends(require_auth)):
+    return await reset_token_devices_api(token)
 
 @app.delete("/api/tokens/{token}")
 async def revoke_token(token: str, _: bool = Depends(require_auth)):

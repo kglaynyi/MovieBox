@@ -30,6 +30,7 @@ from Backend.helper.encrypt import decode_string, encode_string
 from Backend.helper.health import run_health_checks
 from Backend.helper.gdrive_source import is_safe_remote_url
 from Backend.helper.gdi_js import GDIError, GDIClient, config_from_settings, validate_settings_update
+from Backend.helper.device_control import positive_int, reset_token_devices
 from Backend.helper.manual_add import resolve_telegram_message, stamp_caption_by_ref
 from Backend.helper.requests_manager import (
     delete_request,
@@ -415,12 +416,20 @@ async def update_token_limits_api(token: str, payload: dict):
         await db.update_api_token_limits(
             token,
             _parse_limit(daily_limit),
-            _parse_limit(monthly_limit)
+            _parse_limit(monthly_limit),
+            positive_int(payload.get("max_devices")),
+            positive_int(payload.get("max_concurrent_streams")),
         )
         return {"message": "Limits updated successfully"}
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+async def reset_token_devices_api(token: str) -> dict:
+    if not await reset_token_devices(db, token):
+        raise HTTPException(status_code=404, detail="Token not found")
+    return {"status": "success", "message": "Registered devices and playback sessions reset."}
 
 
 #----- Speed test
@@ -867,6 +876,9 @@ async def get_all_tokens_api() -> dict:
                 "sub_status": sub_status,
                 "daily_limit_gb": limits.get("daily_limit_gb") or 0,
                 "monthly_limit_gb": limits.get("monthly_limit_gb") or 0,
+                "max_devices": limits.get("max_devices") or 0,
+                "max_concurrent_streams": limits.get("max_concurrent_streams") or 0,
+                "registered_devices": len(token_doc.get("devices") or []),
                 "daily_bytes": (usage.get("daily") or {}).get("bytes", 0),
                 "monthly_bytes": (usage.get("monthly") or {}).get("bytes", 0),
                 "addon_url": (
